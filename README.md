@@ -63,15 +63,20 @@ flowchart LR
 
 ## Results so far
 
-Measured on recorded test meetings (4 speakers, about 1.5 minutes each), on an Apple M5 MacBook:
+Measured on scripted test meetings (4 distinct **text-to-speech** voices, about 1.5 minutes each), on an
+Apple M5 MacBook:
 
 | | |
 |---|---|
 | End to end (upload → minutes ready) | **~43 s** for 90 s of audio |
-| Speakers separated correctly | **4 of 4** |
+| Speakers separated correctly | **4 of 4** synthetic voices (not yet proven on real people in a room; see below) |
 | Due dates resolved correctly | **all** ("by Wednesday" → Nov 11, "next Tuesday" → Nov 17) |
 | Cost of the AI minutes | **~$0.07 per meeting** (Claude Opus 5.5) |
 | CRM write | Task created and read back in the live Zoho CRM |
+
+Plus one real recording: a 3-minute Zoho Meeting with a single person in the room. There, speaker
+separation **split one voice into two**, and Zoho's own transcript had no speaker labels at all. Claude
+still wrote an accurate summary and correctly proposed **no tasks**, because nobody assigned any.
 
 It hasn't run on a real staff meeting yet; the next step is a pilot with the team.
 
@@ -82,6 +87,9 @@ It hasn't run on a real staff meeting yet; the next step is a pilot with the tea
   with a nudged threshold.
 - **The AI must not "help" too much.** Early runs added an open question nobody asked, and a duplicate
   "put it on the calendar" task alongside the calendar invite itself. Explicit prompt rules fixed both.
+- **Synthetic voices flatter speaker separation.** Four text-to-speech voices separated perfectly; one
+  real person in a room was split into two "speakers". So task owners come from names people actually
+  say ("Sam, can you…"), not from voice labels, and the reviewer assigns anything left unclear.
 - **Check what existing automations do with your records.** A CRM rule closed every open task on a lead
   when the lead's status changed, which would have silently erased meeting tasks. The agent now warns
   before linking a task to a lead.
