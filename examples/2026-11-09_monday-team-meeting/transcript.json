@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "title": "Monday team meeting",
+    "date": "2026-11-09",
+    "source": "demo_team_meeting.m4a",
+    "speaker_mode": "anonymous",
+    "speakers": {
+      "Speaker 1": {
+        "talk_seconds": 30,
+        "turns": 4
+      },
+      "Speaker 2": {
+        "talk_seconds": 17,
+        "turns": 2
+      },
+      "Speaker 3": {
+        "talk_seconds": 15,
+        "turns": 2
+      },
+      "Speaker 4": {
+        "talk_seconds": 10,
+        "turns": 1
+      }
+    }
+  },
+  "turns": [
+    {
+      "speaker": "Speaker 1",
+      "start": 0.0,
+      "end": 8.98,
+      "text": "Alright, let's start the Monday team meeting. First up, the HVAC class that starts on the 17th. Sam, how are employer interviews looking?"
+    },
+    {
+      "speaker": "Speaker 2",
+      "start": 9.86,
+      "end": 19.32,
+      "text": "Three employers have confirmed interview slots. Northside Mechanical still has two technician openings, and I need to call them back. I'll do that by Wednesday."
+    },
+    {
+      "speaker": "Speaker 1",
+      "start": 20.3,
+      "end": 25.16,
+      "text": "Great. Alex, is the new enrollment form sending leads into the CRM correctly?"
+    },
+    {
+      "speaker": "Speaker 3",
+      "start": 26.18,
+      "end": 36.0,
+      "text": "Mostly, yes. But phone calls are still not being locked against student records. I'll open a support ticket with the phone vendor by Friday."
+    },
+    {
+      "speaker": "Speaker 4",
+      "start": 36.76,
+      "end": 47.06,
+      "text": "In the plumbing class, three students still haven't finished the math placement test. I can remind them during class tomorrow. Let's decide this now. We won't"
+    },
+    {
+      "speaker": "Speaker 1",
+      "start": 47.06,
+      "end": 54.1,
+      "text": "start the HVAC class with fewer than eight enrolled students. Alex, please send me the enrolled student list by Thursday."
+    },
+    {
+      "speaker": "Speaker 3",
+      "start": 55.16,
+      "end": 59.96,
+      "text": "Will do. I'll pull it from the CRM and email it to you Thursday morning."
+    },
+    {
+      "speaker": "Speaker 2",
+      "start": 60.7,
+      "end": 68.44,
+      "text": "One more thing. Can we meet the Northside Mechanical Hiring Manager next Tuesday at 2pm? Maria, I'd like you there."
+    },
+    {
+      "speaker": "Speaker 1",
+      "start": 69.24,
+      "end": 77.94,
+      "text": "Yes, let's do Tuesday at 2. Still open for next week. Whether the donor newsletter goes out before Thanksgiving. Thanks, everyone."
+    }
+  ]
+}

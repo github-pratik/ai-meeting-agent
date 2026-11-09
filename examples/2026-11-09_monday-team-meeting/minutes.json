@@ -1,0 +1,172 @@
+{
+  "meta": {
+    "title": "Monday team meeting",
+    "date": "2026-11-09",
+    "source": "demo_team_meeting.m4a",
+    "speaker_mode": "anonymous",
+    "speakers": {
+      "Speaker 1": {
+        "talk_seconds": 30,
+        "turns": 4
+      },
+      "Speaker 2": {
+        "talk_seconds": 17,
+        "turns": 2
+      },
+      "Speaker 3": {
+        "talk_seconds": 15,
+        "turns": 2
+      },
+      "Speaker 4": {
+        "talk_seconds": 10,
+        "turns": 1
+      }
+    }
+  },
+  "confirmed_names": {},
+  "model": "claude-opus-5-5",
+  "usage": {
+    "input_tokens": 3632,
+    "output_tokens": 2877,
+    "est_cost_usd": 0.0721
+  },
+  "minutes": {
+    "summary": "The team reviewed readiness for the HVAC class starting November 17. Three employers have confirmed interview slots. Northside Mechanical still has two technician openings and needs a callback. The new enrollment form is mostly sending leads into the CRM, but phone calls are not being logged against student records. Three plumbing students still need to finish the math placement test. The team decided the HVAC class will not start with fewer than eight enrolled students, and set a meeting with Northside Mechanical's hiring manager for Tuesday, November 17 at 2pm.",
+    "speaker_guesses": [
+      {
+        "label": "Speaker 1",
+        "likely_name": "Maria Lopez",
+        "confidence": "high",
+        "evidence": "Runs the meeting. Answers 'Yes, let's do Tuesday at 2' after being addressed as Maria at 00:01:00"
+      },
+      {
+        "label": "Speaker 2",
+        "likely_name": "Sam Carter",
+        "confidence": "high",
+        "evidence": "Addressed as Sam at 00:00:00 and reports on employer interviews"
+      },
+      {
+        "label": "Speaker 3",
+        "likely_name": "Alex Kim",
+        "confidence": "high",
+        "evidence": "Addressed as Alex at 00:00:20 and 00:00:47 and answers about the CRM"
+      },
+      {
+        "label": "Speaker 4",
+        "likely_name": "Dana Brooks",
+        "confidence": "medium",
+        "evidence": "Reports on the plumbing class and will remind students during class, which fits the Lead Instructor"
+      }
+    ],
+    "topics": [
+      {
+        "title": "HVAC class starting Nov 17 - employer interviews",
+        "notes": [
+          "Three employers have confirmed interview slots.",
+          "Northside Mechanical still has two technician openings. Sam will call them back."
+        ]
+      },
+      {
+        "title": "Enrollment form and CRM",
+        "notes": [
+          "New enrollment form is mostly sending leads into the CRM correctly.",
+          "Phone calls are still not being logged against student records. Alex will open a ticket with the phone vendor."
+        ]
+      },
+      {
+        "title": "Plumbing class - math placement test",
+        "notes": [
+          "Three students still haven't finished the math placement test.",
+          "Dana will remind them in class tomorrow."
+        ]
+      },
+      {
+        "title": "HVAC minimum enrollment",
+        "notes": [
+          "The HVAC class will not start with fewer than eight enrolled students.",
+          "Alex will send Maria the enrolled student list from the CRM."
+        ]
+      },
+      {
+        "title": "Donor newsletter",
+        "notes": [
+          "Whether the donor newsletter goes out before Thanksgiving is still open for next week."
+        ]
+      }
+    ],
+    "decisions": [
+      {
+        "decision": "The HVAC class will not start with fewer than eight enrolled students.",
+        "made_by": "Maria Lopez"
+      },
+      {
+        "decision": "Meet the Northside Mechanical hiring manager on Tuesday, Nov 17 at 2pm, with Maria attending.",
+        "made_by": "Maria Lopez"
+      }
+    ],
+    "action_items": [
+      {
+        "id": "A1",
+        "task": "Call Northside Mechanical back about their two technician openings",
+        "owner": "Sam Carter",
+        "due_date": "2026-11-11",
+        "due_text": "by Wednesday",
+        "priority": "Normal",
+        "related_to": "Northside Mechanical",
+        "timestamp": "00:00:09",
+        "quote": "I need to call them back. I'll do that by Wednesday."
+      },
+      {
+        "id": "A2",
+        "task": "Open a support ticket with the phone vendor about calls not being logged against student records",
+        "owner": "Alex Kim",
+        "due_date": "2026-11-13",
+        "due_text": "by Friday",
+        "priority": "Normal",
+        "related_to": "",
+        "timestamp": "00:00:26",
+        "quote": "I'll open a support ticket with the phone vendor by Friday."
+      },
+      {
+        "id": "A3",
+        "task": "Remind the three plumbing students to finish the math placement test",
+        "owner": "Dana Brooks",
+        "due_date": "2026-11-10",
+        "due_text": "during class tomorrow",
+        "priority": "Normal",
+        "related_to": "Plumbing class",
+        "timestamp": "00:00:36",
+        "quote": "I can remind them during class tomorrow."
+      },
+      {
+        "id": "A4",
+        "task": "Pull the enrolled HVAC student list from the CRM and email it to Maria",
+        "owner": "Alex Kim",
+        "due_date": "2026-11-12",
+        "due_text": "Thursday morning",
+        "priority": "High",
+        "related_to": "HVAC class starting Nov 17",
+        "timestamp": "00:00:55",
+        "quote": "I'll pull it from the CRM and email it to you Thursday morning."
+      }
+    ],
+    "follow_up_meetings": [
+      {
+        "title": "Meeting with Northside Mechanical Hiring Manager",
+        "date": "2026-11-17",
+        "start_time": "14:00",
+        "duration_minutes": 60,
+        "attendees": [
+          "Sam Carter",
+          "Maria Lopez"
+        ],
+        "purpose": "Meet the Northside Mechanical hiring manager about their technician openings"
+      }
+    ],
+    "open_questions": [
+      "Should the donor newsletter go out before Thanksgiving? (to be decided next week)"
+    ],
+    "recap_email_subject": "Recap: Monday team meeting - Nov 9",
+    "recap_email_body": "Hi all,\n\nSummary:\nWe reviewed readiness for the HVAC class starting Nov 17. Three employers have confirmed interview slots, and Northside Mechanical still has two technician openings. The enrollment form is mostly sending leads into the CRM, but phone calls are not being logged against student records. Three plumbing students still need to finish the math placement test.\n\nDecisions:\n- The HVAC class will not start with fewer than eight enrolled students.\n- We will meet the Northside Mechanical hiring manager on Tue Nov 17 at 2pm (Sam and Maria).\n\nTasks:\nSam Carter\n- Call Northside Mechanical back about their two technician openings. Due Wed Nov 11.\n\nAlex Kim\n- Open a support ticket with the phone vendor about call logging. Due Fri Nov 13.\n- Email Maria the enrolled HVAC student list from the CRM. Due Thu Nov 12 (morning).\n\nDana Brooks\n- Remind the three plumbing students to finish the math placement test. Due Tue Nov 10 (in class).\n\nOpen questions:\n- Should the donor newsletter go out before Thanksgiving? To be decided next week.\n\nThanks,"
+  }
+}

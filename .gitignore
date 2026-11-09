@@ -1,0 +1,17 @@
+# secrets and organisation data - never publish
+.env
+config.json
+staff.json
+web/static/logo.png
+
+# real meetings and recordings
+meetings/
+inbox/
+
+# environment, models, caches
+.venv/
+models/
+__pycache__/
+*.pyc
+*.tmp
+.DS_Store

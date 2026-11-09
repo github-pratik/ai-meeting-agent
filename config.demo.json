@@ -1,0 +1,10 @@
+{
+  "_note": "Demo mode: opens the fictional sample meeting in examples/. Run: python app.py --config config.demo.json",
+  "org_name": "Northfield Trade Academy",
+  "org_description": "a small pre-apprenticeship trade school (HVAC and plumbing) that places graduates with local employers",
+  "staff_file": "staff.example.json",
+  "meetings_dir": "examples",
+  "zoho_task_url": "",
+  "logo": "",
+  "admin_name": "Alex"
+}

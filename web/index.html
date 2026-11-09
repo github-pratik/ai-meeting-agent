@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Agent</title>
+<style>
+@font-face { font-family: 'Barlow'; src: url('/static/Barlow-Regular.ttf') format('truetype'); font-weight: 400; }
+@font-face { font-family: 'Barlow'; src: url('/static/Barlow-Medium.ttf') format('truetype'); font-weight: 500; }
+@font-face { font-family: 'Barlow'; src: url('/static/Barlow-SemiBold.ttf') format('truetype'); font-weight: 600; }
+@font-face { font-family: 'Barlow'; src: url('/static/Barlow-Bold.ttf') format('truetype'); font-weight: 700; }
+@font-face { font-family: 'Barlow'; src: url('/static/Barlow-ExtraBold.ttf') format('truetype'); font-weight: 800; }
+:root {
+  --maroon: #92302C; --maroon-dark: #74241f; --gold: #DCA235; --gold-text: #9a6a10;
+  --asphalt: #1A1918; --concrete: #F7F6F4; --line: #e4e0da; --muted: #6b6661; --white: #fff;
+  --ok: #2f7a45; --ok-bg: #e8f3ec; --warn-bg: #fbf3e2; --skip-bg: #efedea;
+  color-scheme: light;
+}
+* { box-sizing: border-box; min-width: 0; }
+html, body { overflow-x: hidden; }
+body { margin: 0; background: var(--concrete); color: var(--asphalt); font: 15px/1.5 'Barlow', Arial, Helvetica, sans-serif; }
+a { color: var(--maroon); }
+button, input, select, textarea { font: inherit; color: inherit; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+/* header */
+header { background: var(--white); border-bottom: 3px solid var(--maroon); }
+header .wrap { display: flex; align-items: center; gap: 12px; min-height: 56px; }
+header img { height: 30px; display: block; }
+.brand-title { font-weight: 800; letter-spacing: 2px; text-transform: uppercase; font-size: 13px; color: var(--maroon); border-left: 2px solid var(--line); padding-left: 12px; white-space: nowrap; }
+header nav { margin-left: auto; display: flex; gap: 6px; }
+.stripe { height: 4px; background: repeating-linear-gradient(45deg, var(--gold) 0 10px, var(--asphalt) 10px 20px); }
+@media (max-width: 520px) { .brand-title.with-logo { display: none; } }
+
+/* type */
+.eyebrow { font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; font-size: 11px; color: var(--gold-text); margin: 0 0 2px; }
+h1 { font-weight: 800; font-size: 24px; line-height: 1.2; margin: 0; }
+h2 { font-weight: 800; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--maroon); margin: 0 0 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 2px solid var(--maroon); background: var(--maroon); color: var(--white); border-radius: 6px; padding: 6px 14px; font-weight: 700; cursor: pointer; text-decoration: none; font-size: 14px; white-space: nowrap; }
+.btn:hover { background: var(--maroon-dark); border-color: var(--maroon-dark); }
+.btn.ghost { background: transparent; color: var(--maroon); }
+.btn.ghost:hover { background: #f6eceb; }
+.btn.plain { background: var(--white); border-color: var(--line); color: var(--asphalt); }
+.btn.sm { padding: 3px 10px; font-size: 13px; }
+.btn.icon { padding: 3px 8px; min-width: 32px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+main { padding: 16px 0 40px; }
+.card { background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+
+/* home */
+.hero { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.hero > div { flex: 1 1 280px; }
+.flow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 14px; font-size: 13px; }
+.flow span { background: var(--white); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-weight: 600; }
+.flow b { color: var(--gold-text); margin-right: 4px; }
+.flow i { color: var(--muted); font-style: normal; }
+.mrow { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-top: 1px solid var(--line); text-decoration: none; color: inherit; }
+.mrow:first-of-type { border-top: 0; }
+.mrow:hover .mtitle { color: var(--maroon); }
+.mtitle { font-weight: 700; }
+.mrow .meta { margin-left: auto; text-align: right; font-size: 13px; color: var(--muted); flex: none; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; background: var(--skip-bg); color: var(--muted); white-space: nowrap; }
+.pill.ready, .pill.created, .pill.sent { background: var(--ok-bg); color: var(--ok); }
+.pill.approved, .pill.draft { background: var(--warn-bg); color: var(--gold-text); }
+.pill.working { background: #f6eceb; color: var(--maroon); }
+.pill.error { background: #fbe9e7; color: #a12a1f; }
+
+/* forms */
+label { display: block; font-weight: 600; font-size: 12px; margin: 8px 0 3px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+input[type=text], input[type=number], input[type=date], input[type=time], input[type=search], select, textarea { width: 100%; border: 1px solid #cfc9c1; border-radius: 6px; padding: 6px 8px; background: var(--white); font-size: 14px; }
+textarea { min-height: 160px; line-height: 1.45; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 10px; }
+.tabs2 { display: flex; gap: 8px; margin: 12px 0 8px; }
+.tab2 { flex: 1; text-align: center; padding: 10px; border: 2px solid var(--line); border-radius: 8px; cursor: pointer; font-weight: 700; background: var(--white); }
+.tab2.on { border-color: var(--maroon); color: var(--maroon); }
+.recbox { text-align: center; padding: 16px; border: 2px dashed var(--line); border-radius: 10px; }
+.rec-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #c62828; margin-right: 6px; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+.timer { font-size: 30px; font-weight: 800; letter-spacing: 2px; margin: 4px 0 10px; font-variant-numeric: tabular-nums; }
+.err { color: #a12a1f; font-weight: 600; margin-top: 8px; }
+
+/* progress */
+.prog { list-style: none; padding: 0; margin: 10px 0 0; }
+.prog li { display: flex; align-items: center; gap: 10px; padding: 6px 0; color: var(--muted); }
+.prog li .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+.prog li.done { color: var(--asphalt); }
+.prog li.done .dot { background: var(--ok); border-color: var(--ok); }
+.prog li.now { color: var(--maroon); font-weight: 700; }
+.prog li.now .dot { border-color: var(--maroon); border-top-color: transparent; animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* meeting header bar */
+.mhead { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.mhead > div:first-child { flex: 1 1 260px; }
+.stats { display: flex; gap: 6px; flex-wrap: wrap; }
+.stat { background: var(--white); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+.stat b { font-size: 16px; margin-right: 3px; }
+.bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--white); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+.bar audio { height: 32px; flex: 1 1 220px; }
+.chips { display: flex; gap: 4px 10px; flex-wrap: wrap; align-items: center; flex: 1 1 260px; font-size: 13px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-weight: 600; }
+.swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.guess { color: var(--gold-text); font-weight: 700; }
+.spkpanel { width: 100%; border-top: 1px solid var(--line); padding-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.spkpanel[hidden] { display: none; }
+.spkpanel small { display: block; color: var(--muted); font-size: 11px; }
+.banner { background: var(--asphalt); color: var(--white); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-size: 14px; }
+.banner code { background: #33302e; padding: 1px 5px; border-radius: 4px; color: var(--gold); }
+
+/* tabs */
+.tabs { display: flex; gap: 2px; border-bottom: 2px solid var(--line); margin-bottom: 10px; overflow-x: auto; scrollbar-width: none; }
+.tab { border: 0; background: none; padding: 8px 14px; font-weight: 700; color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; white-space: nowrap; }
+.tab.on { color: var(--maroon); border-bottom-color: var(--maroon); }
+.tab .n { display: inline-block; background: var(--skip-bg); border-radius: 999px; padding: 0 7px; font-size: 12px; margin-left: 4px; }
+.tab.on .n { background: #f6eceb; }
+
+/* action rows */
+.listhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.listhead .grow { flex: 1; }
+details.ar { background: var(--white); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; margin-bottom: 6px; }
+details.ar.approved { border-left-color: var(--gold); }
+details.ar.skipped { opacity: .55; }
+details.ar.created, details.ar.sent, details.ar.draft { border-left-color: var(--ok); }
+details.ar > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex-wrap: wrap; }
+details.ar > summary::-webkit-details-marker { display: none; }
+details.ar > summary::before { content: '▸'; color: var(--muted); font-size: 12px; transition: transform .15s; }
+details.ar[open] > summary::before { transform: rotate(90deg); }
+.ar .k { font-weight: 800; font-size: 11px; color: var(--muted); letter-spacing: 1px; flex: none; }
+.ar .t { flex: 1 1 200px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar .m { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); flex: none; }
+.ar .m .who { color: var(--asphalt); font-weight: 600; }
+.ar .btns { display: flex; gap: 4px; flex: none; }
+.ar .body { padding: 0 12px 12px 30px; border-top: 1px dashed var(--line); }
+.quote { font-size: 13px; color: var(--muted); margin-top: 8px; border-left: 3px solid var(--gold); padding-left: 8px; }
+.ts { background: none; border: 0; color: var(--maroon); cursor: pointer; padding: 0; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 12px; }
+.sect { margin: 14px 0 6px; }
+
+/* minutes tab */
+.sum { margin: 0; }
+.more { background: none; border: 0; color: var(--maroon); font-weight: 700; cursor: pointer; padding: 0; }
+ul.clean { margin: 0; padding-left: 18px; }
+ul.clean li { margin: 3px 0; }
+details.topic { border-top: 1px solid var(--line); padding: 6px 0; }
+details.topic > summary { cursor: pointer; font-weight: 700; }
+details.topic ul { margin-top: 4px; }
+
+/* transcript tab */
+.transcript { max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+.turn { padding: 4px 6px; border-radius: 6px; font-size: 14px; }
+.turn .who { font-weight: 700; margin: 0 4px; }
+.turn.playing { background: #fff7e6; }
+.turn.hide { display: none; }
+.empty { text-align: center; padding: 24px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a href="#/" id="logo"></a>
+    <span class="brand-title" id="brand">Meeting Agent</span>
+    <nav>
+      <a class="btn plain sm" href="#/">Meetings</a>
+      <a class="btn sm" href="#/new">+ New</a>
+    </nav>
+  </div>
+</header>
+<div class="stripe"></div>
+<main><div class="wrap" id="app"></div></main>
+
+<script>
+const $app = document.getElementById('app');
+const COLORS = ['#92302C', '#2F5D8A', '#B07A12', '#3C7A4A', '#6B4C9A', '#8A5A2B', '#1A1918', '#B04A7A'];
+const STAGES = [
+  ['converting', 'Prepare the audio'],
+  ['diarizing', 'Tell speakers apart (on this Mac)'],
+  ['transcribing', 'Write down what was said (on this Mac)'],
+  ['minutes', 'Claude writes the minutes and proposes actions'],
+  ['ready', 'Ready for review'],
+];
+const DONE = ['created', 'sent', 'draft'];
+let STAFF = [], CFG = {org_name: '', admin_name: 'An admin'};
+let pollTimer = null;
+// UI state kept across re-renders of the same meeting
+const ui = {id: null, tab: 'actions', open: new Set(), fullSummary: false, spkOpen: false};
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const api = async (url, opts) => {
+  const r = await fetch(url, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+  return j;
+};
+const post = (url, body) => api(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+const fmtDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'}) : '';
+const shortDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday: 'short', month: 'numeric', day: 'numeric'}) : 'No date';
+const toSec = ts => ts.split(':').reduce((a, b) => a * 60 + Number(b), 0);
+const fmtTs = s => new Date(s * 1000).toISOString().substring(11, 19);
+const firstName = n => (n || '').split(' ')[0];
+const stageLabel = s => ({ready: 'Ready', error: 'Error', queued: 'Queued', transcribed: 'Transcribed'}[s] || 'Working');
+const stageClass = s => s === 'ready' ? 'ready' : s === 'error' ? 'error' : 'working';
+const firstSentences = (t, n) => { const m = t.match(/[^.!?]+[.!?]+(\s|$)/g) || [t]; return m.slice(0, n).join('').trim(); };
+
+window.addEventListener('hashchange', route);
+(async () => {
+  [STAFF, CFG] = await Promise.all([api('/api/staff'), api('/api/config')]);
+  if (CFG.logo) { document.getElementById('logo').innerHTML = `<img src="${esc(CFG.logo)}" alt="${esc(CFG.org_name)}">`; document.getElementById('brand').classList.add('with-logo'); }
+  else document.getElementById('brand').style.cssText = 'border-left:0;padding-left:0';
+  document.title = `${CFG.org_name} · Meeting Agent`;
+  route();
+})();
+
+function route() {
+  clearInterval(pollTimer);
+  const h = location.hash.slice(1) || '/';
+  if (h === '/new') return viewNew();
+  const m = h.match(/^\/m\/(.+)$/);
+  if (m) return viewMeeting(decodeURIComponent(m[1]));
+  viewHome();
+}
+
+/* ---------- home ---------- */
+async function viewHome() {
+  const list = await api('/api/meetings');
+  $app.innerHTML = `
+    <div class="hero"><div>
+      <p class="eyebrow">${esc(CFG.org_name)} staff meetings</p>
+      <h1>Nobody has to take notes.</h1>
+      <div class="flow">
+        <span><b>1</b>Record</span><i>→</i><span><b>2</b>Transcribe on this Mac</span><i>→</i>
+        <span><b>3</b>AI minutes</span><i>→</i><span><b>4</b>You approve</span>
+      </div>
+    </div><a class="btn" href="#/new">+ New meeting</a></div>
+    <div class="card">
+      <h2>Meetings</h2>
+      ${list.length ? list.map(m => `
+        <a class="mrow" href="#/m/${encodeURIComponent(m.id)}">
+          <div style="flex:1 1 auto">
+            <div class="mtitle clip">${esc(m.title)}</div>
+            <div class="small muted clip">${esc(fmtDate(m.date))}${m.speakers ? ` · ${m.speakers} speakers` : ''}</div>
+          </div>
+          <div class="meta">
+            <span class="pill ${stageClass(m.stage)}">${stageLabel(m.stage)}</span>
+            ${m.actions ? `<div>${m.actions} tasks · ${m.approved + m.done} reviewed</div>` : ''}
+          </div>
+        </a>`).join('') : `<div class="empty">No meetings yet. <a href="#/new">Add the first one</a>.</div>`}
+    </div>
+    <details class="card small"><summary style="cursor:pointer;font-weight:700">How it works</summary>
+      <ul class="clean muted" style="margin-top:6px">
+        <li><b>Record</b> in the room, or upload a Teams / Zoho Meeting recording or .vtt transcript.</li>
+        <li><b>Transcribe</b> runs on this Mac. The audio never leaves the building.</li>
+        <li><b>AI minutes:</b> Claude pulls out decisions, tasks, owners, due dates and follow-ups (a few cents per meeting).</li>
+        <li><b>You approve:</b> nothing goes into Zoho or Outlook until someone approves it and an admin runs it.</li>
+      </ul>
+    </details>`;
+}
+
+/* ---------- new meeting ---------- */
+function viewNew() {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  $app.innerHTML = `
+    <p class="eyebrow">New meeting</p><h1>Add a meeting</h1>
+    <div class="card" style="max-width:700px;margin-top:10px">
+      <div class="row">
+        <div><label for="title">Meeting name</label><input id="title" type="text" value="Staff meeting"></div>
+        <div><label for="date">Date</label><input id="date" type="date" value="${today}"></div>
+        <div><label for="spk">People who spoke</label><input id="spk" type="number" min="1" max="12" placeholder="Optional"></div>
+      </div>
+      <div class="tabs2">
+        <div class="tab2 on" data-t="rec">Record here</div>
+        <div class="tab2" data-t="up">Upload a file</div>
+      </div>
+      <div id="pane-rec" class="recbox">
+        <div id="recState" class="muted small">Put this laptop in the middle of the table. Tell everyone it's being recorded.</div>
+        <div class="timer" id="timer">00:00:00</div>
+        <button class="btn" id="recBtn">Start recording</button>
+      </div>
+      <div id="pane-up" class="recbox" style="display:none">
+        <p class="muted small" style="margin-top:0">Audio or video (m4a, mp3, wav, mp4, mov, webm), or a Teams <b>.vtt</b> transcript (keeps real names).</p>
+        <input type="file" id="file" accept=".m4a,.mp3,.wav,.webm,.mp4,.mov,.ogg,.aac,.vtt" style="max-width:100%">
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="go" disabled>Process meeting</button>
+        <span class="small muted" id="hint">Record or choose a file first.</span>
+      </div>
+      <div class="err" id="err"></div>
+    </div>`;
+
+  let blob = null, recorder = null, chunks = [], t0 = 0, tick = null, mode = 'rec';
+  const go = document.getElementById('go'), hint = document.getElementById('hint');
+  const ready = ok => { go.disabled = !ok; hint.textContent = ok ? 'Ready.' : 'Record or choose a file first.'; };
+
+  document.querySelectorAll('.tab2').forEach(t => t.onclick = () => {
+    document.querySelectorAll('.tab2').forEach(x => x.classList.toggle('on', x === t));
+    mode = t.dataset.t;
+    document.getElementById('pane-rec').style.display = mode === 'rec' ? '' : 'none';
+    document.getElementById('pane-up').style.display = mode === 'up' ? '' : 'none';
+    ready(mode === 'rec' ? !!blob : !!document.getElementById('file').files[0]);
+  });
+  document.getElementById('file').onchange = e => ready(!!e.target.files[0]);
+
+  document.getElementById('recBtn').onclick = async () => {
+    const btn = document.getElementById('recBtn'), st = document.getElementById('recState');
+    if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: true}});
+      chunks = []; blob = null; ready(false);
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        clearInterval(tick);
+        blob = new Blob(chunks, {type: recorder.mimeType || 'audio/webm'});
+        st.innerHTML = 'Recording saved. Press <b>Process meeting</b>, or record again.';
+        btn.textContent = 'Record again'; btn.classList.add('ghost');
+        ready(true);
+      };
+      recorder.start(1000);
+      t0 = Date.now();
+      tick = setInterval(() => document.getElementById('timer').textContent = fmtTs((Date.now() - t0) / 1000), 500);
+      st.innerHTML = '<span class="rec-dot"></span>Recording…';
+      btn.textContent = 'Stop recording'; btn.classList.remove('ghost');
+    } catch (e) {
+      st.innerHTML = '<span class="err">Microphone blocked. Allow mic access in the browser, or use Upload a file.</span>';
+    }
+  };
+
+  go.onclick = async () => {
+    const fd = new FormData();
+    fd.append('title', document.getElementById('title').value || 'Meeting');
+    fd.append('date', document.getElementById('date').value);
+    const n = document.getElementById('spk').value;
+    if (n) fd.append('speakers', n);
+    if (mode === 'rec') {
+      const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+      fd.append('file', blob, `recording.${ext}`);
+    } else fd.append('file', document.getElementById('file').files[0]);
+    go.disabled = true; hint.textContent = 'Uploading…';
+    try {
+      const r = await api('/api/meetings', {method: 'POST', body: fd});
+      location.hash = '#/m/' + encodeURIComponent(r.id);
+    } catch (e) { document.getElementById('err').textContent = e.message; go.disabled = false; }
+  };
+}
+
+/* ---------- meeting ---------- */
+async function viewMeeting(id) {
+  if (ui.id !== id) Object.assign(ui, {id, tab: 'actions', open: new Set(), fullSummary: false, spkOpen: false});
+  let d;
+  try { d = await api('/api/meetings/' + encodeURIComponent(id)); }
+  catch { $app.innerHTML = '<div class="empty">Meeting not found. <a href="#/">Back</a></div>'; return; }
+  const stage = d.status?.stage || 'ready';
+  const title = d.transcript?.meta?.title || d.meta?.title || id;
+  const date = d.transcript?.meta?.date || d.meta?.date;
+  if (stage !== 'ready' && !(stage === 'error' && d.minutes)) return viewProgress(id, title, date, d.status);
+  const y = window.scrollY, playing = document.getElementById('player');
+  const t = playing && !playing.paused ? playing.currentTime : null;
+  renderMeeting(id, d, title, date);
+  window.scrollTo(0, y);
+  if (t !== null) { const p = document.getElementById('player'); p.currentTime = t; p.play(); }
+}
+
+function viewProgress(id, title, date, status) {
+  const idx = STAGES.findIndex(s => s[0] === status.stage);
+  $app.innerHTML = `
+    <p class="eyebrow">${esc(fmtDate(date))}</p><h1>${esc(title)}</h1>
+    <div class="card" style="max-width:560px;margin-top:10px">
+      ${status.stage === 'error'
+        ? `<h2>Something went wrong</h2><p class="err">${esc(status.message)}</p><a class="btn ghost" href="#/new">Try again</a>`
+        : `<h2>${status.stage === 'queued' ? 'Waiting in line' : 'Working on it'}</h2>
+           <div class="small muted">About 1 minute per 10 minutes of audio. You can leave this page.</div>
+           <ul class="prog">${STAGES.map((s, i) => `<li class="${i < idx ? 'done' : i === idx ? 'now' : ''}"><span class="dot"></span>${s[1]}</li>`).join('')}</ul>`}
+    </div>`;
+  if (status.stage !== 'error') pollTimer = setInterval(async () => {
+    const d = await api('/api/meetings/' + encodeURIComponent(id));
+    if (d.status.stage !== status.stage) { clearInterval(pollTimer); viewMeeting(id); }
+  }, 2000);
+}
+
+function renderMeeting(id, d, title, date) {
+  const M = d.minutes?.minutes;
+  const confirmed = d.minutes?.confirmed_names || {};
+  const guesses = Object.fromEntries((M?.speaker_guesses || []).map(g => [g.label, g]));
+  const turns = d.transcript?.turns || [];
+  const named = d.transcript?.meta?.speaker_mode === 'named';
+  const labels = [...new Set(turns.map(t => t.speaker))];
+  const color = Object.fromEntries(labels.map((l, i) => [l, COLORS[i % COLORS.length]]));
+  const nameOf = l => named ? l : (confirmed[l] || guesses[l]?.likely_name || l);
+  const isGuess = l => !named && !confirmed[l];
+  const items = d.actions?.items || [];
+  const tasks = items.filter(i => i.type === 'task'), invites = items.filter(i => i.type === 'meeting'), email = items.find(i => i.type === 'email');
+  const count = st => items.filter(i => st.includes(i.status)).length;
+  const pending = count(['pending']), approved = count(['approved']), done = count(DONE);
+  const staffNames = STAFF.map(s => s.name);
+  const stats = d.transcript?.meta?.speakers || {};
+  const enc = encodeURIComponent(id);
+
+  const tabBtn = (k, label, n) => `<button class="tab ${ui.tab === k ? 'on' : ''}" data-tab="${k}">${label}${n != null ? `<span class="n">${n}</span>` : ''}</button>`;
+
+  const row = (it, summary, body) => {
+    const locked = DONE.includes(it.status);
+    const btns = locked
+      ? (it.zoho_url ? `<a class="btn ghost sm" href="${esc(it.zoho_url)}" target="_blank" rel="noopener" data-stop>Open in Zoho</a>`
+         : it.outlook_url ? `<a class="btn ghost sm" href="${esc(it.outlook_url)}" target="_blank" rel="noopener" data-stop>Open</a>` : pill(it))
+      : it.status === 'pending'
+        ? `<button class="btn icon sm" data-set="approved" title="Approve">✓ Approve</button><button class="btn plain icon sm" data-set="skipped" title="Skip">✕</button>`
+        : `${pill(it)}<button class="btn plain sm" data-set="pending">Undo</button>`;
+    return `<details class="ar ${it.status}" data-key="${esc(it.key)}" ${ui.open.has(it.key) ? 'open' : ''}>
+      <summary><span class="k">${esc(it.key === 'EMAIL' ? 'MAIL' : it.key)}</span>${summary}<span class="btns">${btns}</span></summary>
+      <div class="body">${body(locked ? 'disabled' : '')}</div></details>`;
+  };
+  const ownerOpts = sel => [...new Set([...staffNames, 'Unassigned', sel])].map(n => `<option ${n === sel ? 'selected' : ''}>${esc(n)}</option>`).join('');
+
+  const taskRow = it => row(it,
+    `<span class="t" title="${esc(it.task)}">${esc(it.task)}</span>
+     <span class="m"><span class="who">${esc(firstName(it.owner))}</span>·<span>${esc(shortDate(it.due_date))}</span></span>`,
+    dis => `
+      <label>Task</label><input type="text" data-f="task" value="${esc(it.task)}" ${dis}>
+      <div class="row">
+        <div><label>Owner</label><select data-f="owner" ${dis}>${ownerOpts(it.owner)}</select></div>
+        <div><label>Due</label><input type="date" data-f="due_date" value="${esc(it.due_date)}" ${dis}></div>
+        <div><label>Priority</label><select data-f="priority" ${dis}>${['High', 'Normal', 'Low'].map(p => `<option ${p === it.priority ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      </div>
+      ${it.related_to ? `<div class="small muted" style="margin-top:6px">Related to: <b>${esc(it.related_to)}</b></div>` : ''}
+      ${it.quote ? `<div class="quote"><button class="ts" data-seek="${esc(it.timestamp)}">▶ ${esc(it.timestamp)}</button> “${esc(it.quote)}”</div>` : ''}`);
+
+  const inviteRow = it => row(it,
+    `<span class="t" title="${esc(it.title)}">${esc(it.title)}</span>
+     <span class="m"><span class="who">${esc(shortDate(it.date))}</span>${it.start_time ? '· ' + esc(it.start_time) : ''}</span>`,
+    dis => `
+      <label>Title</label><input type="text" data-f="title" value="${esc(it.title)}" ${dis}>
+      <div class="row">
+        <div><label>Date</label><input type="date" data-f="date" value="${esc(it.date)}" ${dis}></div>
+        <div><label>Start</label><input type="time" data-f="start_time" value="${esc(it.start_time)}" ${dis}></div>
+      </div>
+      <div class="small muted" style="margin-top:6px">${it.duration_minutes} min · ${esc(it.attendees.join(', '))}<br>${esc(it.purpose)}</div>`);
+
+  const emailRow = it => row(it,
+    `<span class="t" title="${esc(it.subject)}">${esc(it.subject)}</span>
+     <span class="m">to ${(it.to || []).length} people</span>`,
+    dis => `
+      <label>To</label><input type="text" data-f="to" value="${esc((it.to || []).join(', '))}" ${dis}>
+      <label>Subject</label><input type="text" data-f="subject" value="${esc(it.subject)}" ${dis}>
+      <label>Message</label><textarea data-f="body" ${dis}>${esc(it.body)}</textarea>`);
+
+  const actionsTab = `
+    <div class="listhead">
+      <span class="small muted grow">${pending ? `${pending} waiting for review. Click a row for details or to edit.` : 'Everything has been reviewed.'}</span>
+      ${pending ? `<button class="btn ghost sm" id="approveAll">✓ Approve all ${pending}</button>` : ''}
+    </div>
+    ${tasks.length ? `<h2>Tasks → Zoho</h2>${tasks.map(taskRow).join('')}` : '<p class="muted">No tasks came out of this meeting.</p>'}
+    ${invites.length ? `<h2 class="sect">Follow-up meetings → Calendar</h2>${invites.map(inviteRow).join('')}` : ''}
+    ${email ? `<h2 class="sect">Recap → Outlook</h2>${emailRow(email)}` : ''}`;
+
+  const minutesTab = M ? `
+    <div class="card"><h2>Summary</h2>
+      <p class="sum">${esc(ui.fullSummary ? M.summary : firstSentences(M.summary, 2))}
+      ${firstSentences(M.summary, 2) !== M.summary.trim() ? `<button class="more" id="more">${ui.fullSummary ? 'Less' : 'More'}</button>` : ''}</p></div>
+    ${M.decisions.length ? `<div class="card"><h2>Decisions (${M.decisions.length})</h2><ul class="clean">${M.decisions.map(x => `<li>${esc(x.decision)} <span class="muted small">· ${esc(firstName(x.made_by))}</span></li>`).join('')}</ul></div>` : ''}
+    ${M.open_questions.length ? `<div class="card"><h2>Open questions (${M.open_questions.length})</h2><ul class="clean">${M.open_questions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}
+    <div class="card"><h2>Discussion notes</h2>${M.topics.map(t => `<details class="topic"><summary>${esc(t.title)} <span class="muted small">(${t.notes.length})</span></summary><ul class="clean">${t.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>`).join('')}</div>`
+    : '<div class="card empty">No minutes yet.</div>';
+
+  const transcriptTab = `
+    <input type="search" id="tsearch" placeholder="Search the transcript…" style="margin-bottom:8px">
+    <div class="card transcript" style="padding:8px">${turns.map(t => `<div class="turn" data-start="${t.start}" data-end="${t.end}">
+      <button class="ts" data-seek="${fmtTs(t.start)}">${fmtTs(t.start)}</button>
+      <span class="who" style="color:${color[t.speaker]}">${esc(firstName(nameOf(t.speaker)))}</span>${esc(t.text)}</div>`).join('')}</div>`;
+
+  const spkChips = labels.map(l => `<span class="chip"><span class="swatch" style="background:${color[l]}"></span>${esc(nameOf(l))}${isGuess(l) ? '<span class="guess" title="AI guess, not confirmed">?</span>' : ''}</span>`).join('');
+  const anyGuess = labels.some(isGuess);
+  const spkPanel = named ? '' : `<div class="spkpanel" ${ui.spkOpen ? '' : 'hidden'} id="spkpanel">
+    ${labels.map(l => {
+      const cur = nameOf(l), g = guesses[l];
+      return `<div><select data-spk="${esc(l)}">${[...new Set([cur, ...staffNames, 'Guest'])].map(o => `<option ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>
+        <small><span class="swatch" style="background:${color[l]};display:inline-block"></span> ${esc(l)} · ${stats[l]?.turns ?? '?'} turns${g && !confirmed[l] ? ' · ' + esc(g.evidence) : ''}</small></div>`;
+    }).join('')}
+    <div><button class="btn sm" id="saveNames">Save names &amp; redo minutes</button><small>Re-asks Claude, about $0.07</small></div>
+  </div>`;
+
+  $app.innerHTML = `
+    <div class="mhead">
+      <div><p class="eyebrow">${esc(fmtDate(date))}${d.minutes ? ` · ~$${d.minutes.usage.est_cost_usd.toFixed(2)}` : ''}</p><h1 class="clip">${esc(title)}</h1></div>
+      <div class="stats">
+        <span class="stat"><b>${tasks.length}</b>tasks</span>
+        <span class="stat"><b>${pending}</b>to review</span>
+        <span class="stat"><b>${done}</b>done</span>
+      </div>
+    </div>
+    ${d.status?.stage === 'error' ? `<p class="err">Last update failed: ${esc(d.status.message)}</p>` : ''}
+    ${approved ? `<div class="banner"><b>${approved} approved</b>, waiting to be created. ${esc(CFG.admin_name)} runs <code>/meeting</code> to create them in Zoho / Outlook.</div>` : ''}
+    <div class="bar">
+      <div class="chips"><span class="small muted">Speakers:</span>${spkChips}
+        ${named ? '' : `<button class="btn ${anyGuess ? '' : 'plain'} sm" id="fixNames">${anyGuess ? 'Confirm names' : 'Edit names'}</button>`}</div>
+      ${d.has_audio ? `<audio id="player" controls preload="metadata" src="/api/meetings/${enc}/audio"></audio>` : ''}
+      ${spkPanel}
+    </div>
+    <div class="tabs">
+      ${tabBtn('actions', 'Actions', pending || null)}${tabBtn('minutes', 'Minutes')}${tabBtn('transcript', 'Transcript', turns.length)}
+    </div>
+    <div id="tabbody">${ui.tab === 'minutes' ? minutesTab : ui.tab === 'transcript' ? transcriptTab : actionsTab}</div>`;
+
+  wire(id, d, items);
+}
+
+function wire(id, d, items) {
+  const enc = encodeURIComponent(id);
+  const rerender = () => viewMeeting(id);
+  $app.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; rerender(); });
+  const fix = document.getElementById('fixNames');
+  if (fix) fix.onclick = () => { ui.spkOpen = !ui.spkOpen; document.getElementById('spkpanel').hidden = !ui.spkOpen; };
+  const more = document.getElementById('more');
+  if (more) more.onclick = () => { ui.fullSummary = !ui.fullSummary; rerender(); };
+
+  // remember which rows are open
+  $app.querySelectorAll('details.ar').forEach(el => el.addEventListener('toggle', () => {
+    el.open ? ui.open.add(el.dataset.key) : ui.open.delete(el.dataset.key);
+  }));
+  // links / buttons inside a row summary must not toggle the row
+  $app.querySelectorAll('summary [data-stop]').forEach(a => a.onclick = e => e.stopPropagation());
+
+  // audio seek from timestamps
+  const player = document.getElementById('player');
+  $app.querySelectorAll('[data-seek]').forEach(b => b.onclick = e => {
+    e.preventDefault(); e.stopPropagation();
+    if (!player) return;
+    player.currentTime = toSec(b.dataset.seek); player.play();
+  });
+  if (player) player.ontimeupdate = () => {
+    const now = player.currentTime;
+    $app.querySelectorAll('.turn').forEach(el => el.classList.toggle('playing', now >= +el.dataset.start && now < +el.dataset.end));
+  };
+
+  // transcript search
+  const ts = document.getElementById('tsearch');
+  if (ts) ts.oninput = () => {
+    const q = ts.value.toLowerCase();
+    $app.querySelectorAll('.turn').forEach(el => el.classList.toggle('hide', q && !el.textContent.toLowerCase().includes(q)));
+  };
+
+  // field edits save on change
+  $app.querySelectorAll('.ar [data-f]').forEach(inp => inp.onchange = async () => {
+    const key = inp.closest('.ar').dataset.key, f = inp.dataset.f;
+    const v = f === 'to' ? inp.value.split(',').map(s => s.trim()).filter(Boolean) : inp.value;
+    try { await post(`/api/meetings/${enc}/actions/${encodeURIComponent(key)}`, {[f]: v}); rerender(); }
+    catch (e) { alert(e.message); }
+  });
+  // approve / skip / undo (buttons live in the summary line)
+  $app.querySelectorAll('[data-set]').forEach(b => b.onclick = async e => {
+    e.preventDefault(); e.stopPropagation();
+    const key = b.closest('.ar').dataset.key;
+    try { await post(`/api/meetings/${enc}/actions/${encodeURIComponent(key)}`, {status: b.dataset.set}); rerender(); }
+    catch (err) { alert(err.message); }
+  });
+  const all = document.getElementById('approveAll');
+  if (all) all.onclick = async () => {
+    const keys = items.filter(i => i.status === 'pending').map(i => i.key);
+    if (!confirm(`Approve all ${keys.length} items? Nothing is created until ${CFG.admin_name} runs /meeting.`)) return;
+    for (const k of keys) await post(`/api/meetings/${enc}/actions/${encodeURIComponent(k)}`, {status: 'approved'});
+    rerender();
+  };
+  // speaker names
+  const sn = document.getElementById('saveNames');
+  if (sn) sn.onclick = async () => {
+    const names = {};
+    $app.querySelectorAll('[data-spk]').forEach(s => names[s.dataset.spk] = s.value);
+    sn.disabled = true; sn.textContent = 'Updating…';
+    ui.spkOpen = false;
+    await post(`/api/meetings/${enc}/names`, {names});
+    setTimeout(rerender, 500);
+  };
+}
+
+function pill(it) {
+  const label = {pending: 'To review', approved: 'Approved', skipped: 'Skipped', created: 'In Zoho', sent: 'Sent', draft: 'Draft'}[it.status] || it.status;
+  return `<span class="pill ${it.status}">${label}</span>`;
+}
+</script>
+</body>
+</html>

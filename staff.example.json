@@ -1,0 +1,10 @@
+{
+  "_note": "Fictional demo staff. Copy to staff.json (git-ignored) with your real team. crm_user_id = Zoho CRM user id (Setup > Users), used as the task owner.",
+  "staff": [
+    {"name": "Maria Lopez", "aliases": ["Maria"], "role": "Executive Director", "email": "maria@example.org", "crm_user_id": ""},
+    {"name": "Sam Carter", "aliases": ["Sam"], "role": "Placement Manager", "email": "sam@example.org", "crm_user_id": ""},
+    {"name": "Alex Kim", "aliases": ["Alex"], "role": "Operations and CRM Manager", "email": "alex@example.org", "crm_user_id": ""},
+    {"name": "Dana Brooks", "aliases": ["Dana"], "role": "Lead Instructor", "email": "dana@example.org", "crm_user_id": ""}
+  ],
+  "vocabulary": ["CRM", "Zoho", "HVAC", "plumbing", "pre-apprenticeship", "batch", "placement", "employer", "lead"]
+}

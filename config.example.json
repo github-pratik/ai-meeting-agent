@@ -1,0 +1,10 @@
+{
+  "_note": "Public demo settings. Copy to config.json (git-ignored) and fill in your organization.",
+  "org_name": "Northfield Trade Academy",
+  "org_description": "a small pre-apprenticeship trade school (HVAC and plumbing) that places graduates with local employers",
+  "staff_file": "staff.example.json",
+  "meetings_dir": "meetings",
+  "zoho_task_url": "",
+  "logo": "",
+  "admin_name": "Alex"
+}
