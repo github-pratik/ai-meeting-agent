@@ -262,90 +262,122 @@ async function viewHome() {
 }
 
 /* ---------- new meeting ---------- */
+// One flow: Record -> live transcript in the browser (free) -> Process -> Claude minutes.
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
 function viewNew() {
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   $app.innerHTML = `
-    <p class="eyebrow">New meeting</p><h1>Add a meeting</h1>
+    <p class="eyebrow">New meeting</p><h1>Record a meeting</h1>
     <div class="card" style="max-width:700px;margin-top:10px">
       <div class="row">
         <div><label for="title">Meeting name</label><input id="title" type="text" value="Staff meeting"></div>
         <div><label for="date">Date</label><input id="date" type="date" value="${today}"></div>
-        <div><label for="spk">People who spoke</label><input id="spk" type="number" min="1" max="12" placeholder="Optional"></div>
       </div>
-      <div class="tabs2">
-        <div class="tab2 on" data-t="rec">Record here</div>
-        <div class="tab2" data-t="up">Upload a file</div>
-      </div>
-      <div id="pane-rec" class="recbox">
-        <div id="recState" class="muted small">Put this laptop in the middle of the table. Tell everyone it's being recorded.</div>
+      <div class="recbox" style="margin-top:12px">
+        <div id="recState" class="muted small">Put the phone or laptop in the middle of the table. Tell everyone it's being recorded.</div>
         <div class="timer" id="timer">00:00:00</div>
         <button class="btn" id="recBtn">Start recording</button>
+        <div id="srNote" class="small muted" style="margin-top:8px"></div>
       </div>
-      <div id="pane-up" class="recbox" style="display:none">
-        <p class="muted small" style="margin-top:0">Audio or video (m4a, mp3, wav, mp4, mov, webm), or a Teams <b>.vtt</b> transcript (keeps real names).</p>
-        <input type="file" id="file" accept=".m4a,.mp3,.wav,.webm,.mp4,.mov,.ogg,.aac,.vtt" style="max-width:100%">
+      <div id="liveWrap" style="display:none;margin-top:10px">
+        <label>Live transcript</label>
+        <div id="live" class="card small" style="max-height:180px;overflow-y:auto;margin:0;padding:8px 10px;background:var(--concrete)"></div>
       </div>
       <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <button class="btn" id="go" disabled>Process meeting</button>
-        <span class="small muted" id="hint">Record or choose a file first.</span>
+        <button class="btn" id="go" disabled>Make the minutes</button>
+        <span class="small muted" id="hint">Record first.</span>
       </div>
       <div class="err" id="err"></div>
     </div>`;
 
-  let blob = null, recorder = null, chunks = [], t0 = 0, tick = null, mode = 'rec';
-  const go = document.getElementById('go'), hint = document.getElementById('hint');
-  const ready = ok => { go.disabled = !ok; hint.textContent = ok ? 'Ready.' : 'Record or choose a file first.'; };
+  const $ = id => document.getElementById(id);
+  const go = $('go'), hint = $('hint'), live = $('live');
+  $('srNote').innerHTML = SR
+    ? 'Words are written down live as you talk (built into this browser, free).'
+    : '<span class="err">This browser can\'t transcribe live. Use Chrome or Safari.</span>';
 
-  document.querySelectorAll('.tab2').forEach(t => t.onclick = () => {
-    document.querySelectorAll('.tab2').forEach(x => x.classList.toggle('on', x === t));
-    mode = t.dataset.t;
-    document.getElementById('pane-rec').style.display = mode === 'rec' ? '' : 'none';
-    document.getElementById('pane-up').style.display = mode === 'up' ? '' : 'none';
-    ready(mode === 'rec' ? !!blob : !!document.getElementById('file').files[0]);
-  });
-  document.getElementById('file').onchange = e => ready(!!e.target.files[0]);
+  let blob = null, recorder = null, chunks = [], t0 = 0, tick = null, wakeLock = null;
+  let rec = null, wantListening = false, segments = [], interim = '';
 
-  document.getElementById('recBtn').onclick = async () => {
-    const btn = document.getElementById('recBtn'), st = document.getElementById('recState');
-    if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  const renderLive = () => {
+    live.innerHTML = segments.map(s => `<div><span class="ts">${fmtTs(s.start)}</span> ${esc(s.text)}</div>`).join('')
+      + (interim ? `<div class="muted">${esc(interim)}</div>` : '');
+    live.scrollTop = live.scrollHeight;
+  };
+
+  // Browser speech recognition stops after pauses or ~1 minute; restart it for the whole meeting.
+  const startListening = () => {
+    if (!SR) return;
+    rec = new SR();
+    rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
+    let segStart = (Date.now() - t0) / 1000;
+    rec.onresult = e => {
+      interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i], text = r[0].transcript.trim();
+        if (r.isFinal && text) {
+          const now = (Date.now() - t0) / 1000;
+          segments.push({start: segStart, end: now, text});
+          segStart = now;
+        } else if (!r.isFinal) interim += r[0].transcript;
+      }
+      renderLive();
+    };
+    rec.onerror = e => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wantListening = false; $('srNote').innerHTML = '<span class="err">Live transcript blocked. Allow the microphone for this site.</span>'; }
+      else if (e.error === 'network') $('srNote').innerHTML = '<span class="err">Live transcript needs internet. Reconnecting…</span>';
+    };
+    rec.onend = () => { if (wantListening) setTimeout(startListening, 250); };
+    try { rec.start(); } catch (_) {}
+  };
+
+  $('recBtn').onclick = async () => {
+    const btn = $('recBtn'), st = $('recState');
+    if (recorder && recorder.state === 'recording') {
+      wantListening = false; try { rec && rec.stop(); } catch (_) {}
+      recorder.stop(); return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: true}});
-      chunks = []; blob = null; ready(false);
+      chunks = []; blob = null; segments = []; interim = ''; go.disabled = true; renderLive();
       recorder = new MediaRecorder(stream);
       recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
       recorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
         clearInterval(tick);
+        try { wakeLock && wakeLock.release(); } catch (_) {}
         blob = new Blob(chunks, {type: recorder.mimeType || 'audio/webm'});
-        st.innerHTML = 'Recording saved. Press <b>Process meeting</b>, or record again.';
+        st.innerHTML = `Recording saved · ${segments.length} lines transcribed. Press <b>Make the minutes</b>, or record again.`;
         btn.textContent = 'Record again'; btn.classList.add('ghost');
-        ready(true);
+        go.disabled = false; hint.textContent = 'Ready.';
       };
       recorder.start(1000);
       t0 = Date.now();
-      tick = setInterval(() => document.getElementById('timer').textContent = fmtTs((Date.now() - t0) / 1000), 500);
-      st.innerHTML = '<span class="rec-dot"></span>Recording…';
+      tick = setInterval(() => $('timer').textContent = fmtTs((Date.now() - t0) / 1000), 500);
+      // keep the phone screen on: phones stop recording when they lock
+      try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (_) {}
+      wantListening = true; startListening();
+      $('liveWrap').style.display = SR ? '' : 'none';
+      st.innerHTML = '<span class="rec-dot"></span>Recording… keep this screen open.';
       btn.textContent = 'Stop recording'; btn.classList.remove('ghost');
     } catch (e) {
-      st.innerHTML = '<span class="err">Microphone blocked. Allow mic access in the browser, or use Upload a file.</span>';
+      st.innerHTML = '<span class="err">Microphone blocked. Allow mic access for this site and try again.</span>';
     }
   };
 
   go.onclick = async () => {
     const fd = new FormData();
-    fd.append('title', document.getElementById('title').value || 'Meeting');
-    fd.append('date', document.getElementById('date').value);
-    const n = document.getElementById('spk').value;
-    if (n) fd.append('speakers', n);
-    if (mode === 'rec') {
-      const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
-      fd.append('file', blob, `recording.${ext}`);
-    } else fd.append('file', document.getElementById('file').files[0]);
-    go.disabled = true; hint.textContent = 'Uploading…';
+    fd.append('title', $('title').value || 'Meeting');
+    fd.append('date', $('date').value);
+    const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+    fd.append('file', blob, `recording.${ext}`);
+    if (segments.length) fd.append('transcript', JSON.stringify(segments));
+    go.disabled = true; hint.textContent = 'Saving…';
     try {
       const r = await api('/api/meetings', {method: 'POST', body: fd});
       location.hash = '#/m/' + encodeURIComponent(r.id);
-    } catch (e) { document.getElementById('err').textContent = e.message; go.disabled = false; }
+    } catch (e) { $('err').textContent = e.message; go.disabled = false; }
   };
 }
 
@@ -389,10 +421,11 @@ function renderMeeting(id, d, title, date) {
   const guesses = Object.fromEntries((M?.speaker_guesses || []).map(g => [g.label, g]));
   const turns = d.transcript?.turns || [];
   const named = d.transcript?.meta?.speaker_mode === 'named';
+  const unlabelled = d.transcript?.meta?.speaker_mode === 'unlabelled';
   const labels = [...new Set(turns.map(t => t.speaker))];
   const color = Object.fromEntries(labels.map((l, i) => [l, COLORS[i % COLORS.length]]));
   const nameOf = l => named ? l : (confirmed[l] || guesses[l]?.likely_name || l);
-  const isGuess = l => !named && !confirmed[l];
+  const isGuess = l => !named && !unlabelled && !confirmed[l];
   const items = d.actions?.items || [];
   const tasks = items.filter(i => i.type === 'task'), invites = items.filter(i => i.type === 'meeting'), email = items.find(i => i.type === 'email');
   const count = st => items.filter(i => st.includes(i.status)).length;
@@ -443,7 +476,7 @@ function renderMeeting(id, d, title, date) {
 
   const emailRow = it => row(it,
     `<span class="t" title="${esc(it.subject)}">${esc(it.subject)}</span>
-     <span class="m">to ${(it.to || []).length} people</span>`,
+     <span class="m">to ${(it.to || []).length} ${(it.to || []).length === 1 ? 'person' : 'people'}</span>`,
     dis => `
       <label>To</label><input type="text" data-f="to" value="${esc((it.to || []).join(', '))}" ${dis}>
       <label>Subject</label><input type="text" data-f="subject" value="${esc(it.subject)}" ${dis}>
@@ -471,11 +504,11 @@ function renderMeeting(id, d, title, date) {
     <input type="search" id="tsearch" placeholder="Search the transcript…" style="margin-bottom:8px">
     <div class="card transcript" style="padding:8px">${turns.map(t => `<div class="turn" data-start="${t.start}" data-end="${t.end}">
       <button class="ts" data-seek="${fmtTs(t.start)}">${fmtTs(t.start)}</button>
-      <span class="who" style="color:${color[t.speaker]}">${esc(firstName(nameOf(t.speaker)))}</span>${esc(t.text)}</div>`).join('')}</div>`;
+      ${unlabelled ? '' : `<span class="who" style="color:${color[t.speaker]}">${esc(firstName(nameOf(t.speaker)))}</span>`}${esc(t.text)}</div>`).join('')}</div>`;
 
   const spkChips = labels.map(l => `<span class="chip"><span class="swatch" style="background:${color[l]}"></span>${esc(nameOf(l))}${isGuess(l) ? '<span class="guess" title="AI guess, not confirmed">?</span>' : ''}</span>`).join('');
   const anyGuess = labels.some(isGuess);
-  const spkPanel = named ? '' : `<div class="spkpanel" ${ui.spkOpen ? '' : 'hidden'} id="spkpanel">
+  const spkPanel = (named || unlabelled) ? '' : `<div class="spkpanel" ${ui.spkOpen ? '' : 'hidden'} id="spkpanel">
     ${labels.map(l => {
       const cur = nameOf(l), g = guesses[l];
       return `<div><select data-spk="${esc(l)}">${[...new Set([cur, ...staffNames, 'Guest'])].map(o => `<option ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>
@@ -496,8 +529,8 @@ function renderMeeting(id, d, title, date) {
     ${d.status?.stage === 'error' ? `<p class="err">Last update failed: ${esc(d.status.message)}</p>` : ''}
     ${approved ? `<div class="banner"><b>${approved} approved</b>, waiting to be created. ${esc(CFG.admin_name)} runs <code>/meeting</code> to create them in Zoho / Outlook.</div>` : ''}
     <div class="bar">
-      <div class="chips"><span class="small muted">Speakers:</span>${spkChips}
-        ${named ? '' : `<button class="btn ${anyGuess ? '' : 'plain'} sm" id="fixNames">${anyGuess ? 'Confirm names' : 'Edit names'}</button>`}</div>
+      <div class="chips">${unlabelled ? '<span class="small muted">Speakers not separated (one microphone). Owners come from names people said.</span>' : `<span class="small muted">Speakers:</span>${spkChips}`}
+        ${(named || unlabelled) ? '' : `<button class="btn ${anyGuess ? '' : 'plain'} sm" id="fixNames">${anyGuess ? 'Confirm names' : 'Edit names'}</button>`}</div>
       ${d.has_audio ? `<audio id="player" controls preload="metadata" src="/api/meetings/${enc}/audio"></audio>` : ''}
       ${spkPanel}
     </div>

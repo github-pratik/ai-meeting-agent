@@ -115,8 +115,9 @@ def ts(sec: float) -> str:
 
 def render_md(meta: dict, m: Minutes, names: dict) -> str:
     out = [f"# {meta['title']} — minutes", "",
-           f"**Date:** {meta['date']}  ·  **Attendees (speakers):** "
-           + ", ".join(names.get(g.label, g.likely_name) for g in m.speaker_guesses), "",
+           f"**Date:** {meta['date']}  ·  "
+           + ("**Speakers:** not separated (one microphone)" if meta.get("speaker_mode") == "unlabelled" else
+              "**Attendees (speakers):** " + ", ".join(names.get(g.label, g.likely_name) for g in m.speaker_guesses)), "",
            "## Summary", "", m.summary, ""]
     if m.decisions:
         out += ["## Decisions", ""] + [f"- {d.decision} — *{d.made_by}*" for d in m.decisions] + [""]
@@ -166,12 +167,24 @@ def main():
     staff = load_staff(cfg)
     system = SYSTEM.format(org_name=cfg["org_name"], org_description=cfg["org_description"])
     meeting_day = dt.date.fromisoformat(meta["date"])
-    transcript = "\n".join(
-        f"[{ts(t['start'])}] {names.get(t['speaker'], t['speaker'])}"
-        + (f" ({t['speaker']})" if t["speaker"] in names else "")
-        + f": {t['text']}"
-        for t in turns
-    )
+    unlabelled = meta.get("speaker_mode") == "unlabelled"
+    if unlabelled:  # one microphone, voices not separated: no speaker prefix at all
+        transcript = "\n".join(f"[{ts(t['start'])}] {t['text']}" for t in turns)
+    else:
+        transcript = "\n".join(
+            f"[{ts(t['start'])}] {names.get(t['speaker'], t['speaker'])}"
+            + (f" ({t['speaker']})" if t["speaker"] in names else "")
+            + f": {t['text']}"
+            for t in turns
+        )
+    if unlabelled:
+        speaker_note = ("This transcript has NO speaker labels (one microphone in the room). Take a task owner ONLY "
+                        "from a name actually spoken (e.g. \"Sam, can you...\" then agreement). Never guess an owner "
+                        "from who seems to be talking; use 'Unassigned' instead. Return an empty speaker_guesses list.\n")
+    elif names:
+        speaker_note = f"Confirmed speaker names: {json.dumps(names)}\n"
+    else:
+        speaker_note = "Speaker names are NOT confirmed - infer them, and report your guesses in speaker_guesses.\n"
     context = (
         f"Meeting: {meta['title']}\n"
         f"Meeting date: {meeting_day.isoformat()} ({meeting_day.strftime('%A')})\n"
@@ -179,8 +192,7 @@ def main():
             f"{s['name']} ({s['role']}; also called {', '.join(s.get('aliases', [])) or '-'})" for s in staff["staff"]
         ) + "\n"
         f"Vocabulary: {', '.join(staff['vocabulary'])}\n"
-        + (f"Confirmed speaker names: {json.dumps(names)}\n" if names else
-           "Speaker names are NOT confirmed - infer them, and report your guesses in speaker_guesses.\n")
+        + speaker_note
     )
 
     load_env()

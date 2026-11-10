@@ -107,11 +107,33 @@ def build_actions(folder: Path) -> dict:
 
 
 # ---------- pipeline ----------
-def run_pipeline(folder: Path, src: Path, title: str, date: str, speakers: int | None, names: str = ""):
+def save_live_transcript(folder: Path, src: Path, title: str, date: str, segments: list) -> None:
+    """Browser speech recognition already produced the text: keep a playable copy of the audio and
+    write transcript.json with no speaker labels (one microphone, voices not separated)."""
+    try:
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-ac", "1", "-ar", "16000",
+                        str(folder / "audio.wav")], check=True)
+    except Exception:
+        pass  # transcript still works without playable audio
+    turns = [{"speaker": "Room", "start": round(float(s.get("start", 0)), 2), "end": round(float(s.get("end", 0)), 2),
+              "text": str(s.get("text", "")).strip()[:4000]} for s in segments if str(s.get("text", "")).strip()]
+    meta = {"title": title, "date": date, "source": "live browser transcript", "speaker_mode": "unlabelled",
+            "speakers": {"Room": {"talk_seconds": round(sum(t["end"] - t["start"] for t in turns)), "turns": len(turns)}}}
+    write_json(folder / "transcript.json", {"meta": meta, "turns": turns})
+    lines = [f"# {title} — transcript", "", f"Date: {date} · Source: live browser transcript (speakers not separated)", ""]
+    lines += [f"[{int(t['start'])//3600:02d}:{int(t['start'])%3600//60:02d}:{int(t['start'])%60:02d}] {t['text']}" for t in turns]
+    (folder / "transcript.md").write_text("\n\n".join(lines) + "\n")
+
+
+def run_pipeline(folder: Path, src: Path, title: str, date: str, speakers: int | None, names: str = "",
+                 live: list | None = None):
     set_status(folder, "queued", "Waiting for the previous meeting to finish")
     with job_lock:
         try:
-            if src is not None:
+            if live:
+                set_status(folder, "converting", "Saving the recording")
+                save_live_transcript(folder, src, title, date, live)
+            elif src is not None:
                 cmd = [PY, "-u", str(HERE / "transcribe.py"), str(src), "--title", title, "--date", date,
                        "--folder", str(folder)]
                 if speakers:
@@ -146,6 +168,11 @@ def run_pipeline(folder: Path, src: Path, title: str, date: str, speakers: int |
 @app.get("/")
 def index():
     return send_from_directory(WEB, "index.html")
+
+
+@app.get("/whisper-test")
+def whisper_test():
+    return send_from_directory(WEB, "whisper-test.html")
 
 
 @app.get("/static/<path:name>")
@@ -220,6 +247,13 @@ def api_create():
     except ValueError:
         return jsonify(error="Bad date"), 400
     speakers = request.form.get("speakers", type=int)
+    live = None
+    if request.form.get("transcript"):
+        try:
+            live = json.loads(request.form["transcript"])
+            assert isinstance(live, list)
+        except (ValueError, AssertionError):
+            return jsonify(error="Bad transcript data"), 400
     if not file or not file.filename:
         return jsonify(error="Choose a recording or record one first"), 400
     ext = Path(file.filename).suffix.lower()
@@ -233,7 +267,7 @@ def api_create():
     src = INBOX / f"{mid}{ext}"
     file.save(src)
     write_json(folder / "meta.json", {"title": title, "date": date, "source": file.filename})
-    threading.Thread(target=run_pipeline, args=(folder, src, title, date, speakers), daemon=True).start()
+    threading.Thread(target=run_pipeline, args=(folder, src, title, date, speakers, "", live), daemon=True).start()
     return jsonify(id=mid)
 
 

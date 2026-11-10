@@ -15,3 +15,10 @@ __pycache__/
 *.pyc
 *.tmp
 .DS_Store
+
+# cloud app: secrets, build output, dependencies
+.env.*
+!.env.example
+cloud/node_modules/
+cloud/.cloudflare/
+.wrangler/

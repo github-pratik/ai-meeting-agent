@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Agent</title>
+<style>
+:root { --maroon:#92302C; --maroon-dark:#74241f; --gold:#DCA235; --gold-text:#9a6a10; --ink:#1A1918; --bg:#F7F6F4;
+  --line:#e4e0da; --muted:#6b6661; --ok:#2f7a45; --ok-bg:#e8f3ec; --warn-bg:#fbf3e2; --skip:#efedea; color-scheme: light; }
+* { box-sizing: border-box; min-width: 0; }
+html, body { overflow-x: hidden; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+a { color: var(--maroon); }
+button, input, select, textarea { font: inherit; color: inherit; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+header { background: #fff; border-bottom: 3px solid var(--maroon); }
+header .wrap { display: flex; align-items: center; gap: 10px; min-height: 54px; }
+.brand { font-weight: 800; letter-spacing: 2px; text-transform: uppercase; font-size: 13px; color: var(--maroon); }
+header nav { margin-left: auto; display: flex; gap: 6px; }
+.stripe { height: 4px; background: repeating-linear-gradient(45deg, var(--gold) 0 10px, var(--ink) 10px 20px); }
+main { padding: 16px 0 40px; }
+.eyebrow { font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; font-size: 11px; color: var(--gold-text); margin: 0 0 2px; }
+h1 { font-size: 23px; margin: 0; line-height: 1.2; }
+h2 { font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--maroon); margin: 0 0 8px; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 2px solid var(--maroon); background: var(--maroon);
+  color: #fff; border-radius: 6px; padding: 6px 14px; font-weight: 700; cursor: pointer; text-decoration: none; font-size: 14px; white-space: nowrap; }
+.btn:hover { background: var(--maroon-dark); border-color: var(--maroon-dark); }
+.btn.ghost { background: transparent; color: var(--maroon); } .btn.plain { background: #fff; border-color: var(--line); color: var(--ink); }
+.btn.sm { padding: 3px 10px; font-size: 13px; } .btn.big { padding: 12px 22px; font-size: 17px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+label { display: block; font-weight: 600; font-size: 12px; margin: 8px 0 3px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+input[type=text], input[type=password], input[type=date], input[type=time], select, textarea { width: 100%; border: 1px solid #cfc9c1;
+  border-radius: 6px; padding: 7px 9px; background: #fff; font-size: 15px; }
+textarea { min-height: 160px; font-size: 14px; }
+.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0 10px; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: var(--skip); color: var(--muted); white-space: nowrap; }
+.pill.ready, .pill.created { background: var(--ok-bg); color: var(--ok); } .pill.approved { background: var(--warn-bg); color: var(--gold-text); }
+.pill.recording, .pill.processing { background: #f6eceb; color: var(--maroon); } .pill.error { background: #fbe9e7; color: #a12a1f; }
+.mrow { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-top: 1px solid var(--line); text-decoration: none; color: inherit; }
+.mrow:first-of-type { border-top: 0; } .mrow .meta { margin-left: auto; text-align: right; font-size: 13px; color: var(--muted); flex: none; }
+.recbox { text-align: center; padding: 18px 12px; }
+.timer { font-size: 40px; font-weight: 800; letter-spacing: 2px; font-variant-numeric: tabular-nums; margin: 4px 0 12px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #c62828; margin-right: 6px; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+.live { max-height: 220px; overflow-y: auto; text-align: left; background: var(--bg); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.ts { background: none; border: 0; color: var(--maroon); font-weight: 700; font-size: 12px; padding: 0; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.err { color: #a12a1f; font-weight: 600; }
+.tabs { display: flex; gap: 2px; border-bottom: 2px solid var(--line); margin: 10px 0; overflow-x: auto; }
+.tab { border: 0; background: none; padding: 8px 14px; font-weight: 700; color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; white-space: nowrap; }
+.tab.on { color: var(--maroon); border-bottom-color: var(--maroon); }
+details.ar { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; margin-bottom: 6px; }
+details.ar.approved { border-left-color: var(--gold); } details.ar.skipped { opacity: .55; } details.ar.created { border-left-color: var(--ok); }
+details.ar > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 10px; flex-wrap: wrap; }
+details.ar > summary::-webkit-details-marker { display: none; }
+.ar .k { font-weight: 800; font-size: 11px; color: var(--muted); flex: none; }
+.ar .t { flex: 1 1 200px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar .m { font-size: 13px; color: var(--muted); flex: none; } .ar .m b { color: var(--ink); }
+.ar .btns { display: flex; gap: 4px; flex: none; } .ar .body { padding: 0 12px 12px; border-top: 1px dashed var(--line); }
+.quote { font-size: 13px; color: var(--muted); margin-top: 8px; border-left: 3px solid var(--gold); padding-left: 8px; }
+ul.clean { margin: 0; padding-left: 18px; } ul.clean li { margin: 3px 0; }
+.empty { text-align: center; padding: 24px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header><div class="wrap"><a href="#/" class="brand" style="text-decoration:none" id="brand">Meeting Agent</a>
+  <nav><a class="btn plain sm" href="#/">Meetings</a><a class="btn sm" href="#/new">+ New</a></nav></div></header>
+<div class="stripe"></div>
+<main><div class="wrap" id="app"></div></main>
+<script>
+const $app = document.getElementById('app');
+const PIECE_SECONDS = 60, RATE = 16000;
+let INFO = { org_name: '', staff: [] };
+const ui = { id: null, tab: 'actions', open: new Set() };
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = s => { s = Math.max(0, Math.floor(s)); return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; };
+const shortDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', month:'numeric', day:'numeric'}) : 'No date';
+const longDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric', year:'numeric'}) : '';
+const first = n => (n || '').split(' ')[0];
+const code = () => { try { return localStorage.getItem('teamCode') || ''; } catch { return ''; } };
+// Pull the code out of whatever was typed or pasted: ignore case, spaces, quotes, backticks, extra words.
+const cleanCode = raw => { const t = String(raw || '').toLowerCase().replace(/[`'"\s]/g, ' ');
+  const m = t.match(/[a-z]+-[a-z]+-\d{3,6}/); return m ? m[0] : t.trim().replace(/\s+/g, ''); };
+const saveCode = c => { try { localStorage.setItem('teamCode', cleanCode(c)); } catch {} };
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {...opts, headers: {...(opts.headers || {}), 'x-team-code': code()}});
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { askCode(); throw new Error('Team code needed'); }
+  if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+  return j;
+}
+const post = (path, body) => api(path, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body)});
+
+function askCode(msg) {
+  $app.innerHTML = `<div class="card" style="max-width:420px;margin:40px auto">
+    <h2>Team sign-in</h2><p class="muted small" style="margin-top:0">Enter the team code you were given. This device remembers it.</p>
+    <input type="text" id="code" placeholder="e.g. word-word-1234" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go">
+    <div style="margin-top:10px"><button class="btn" id="go">Continue</button></div>
+    ${msg ? `<p class="err">${esc(msg)}</p>` : ''}
+    <p class="small muted">Easiest: open the sign-in link your admin sent you. It fills this in for you.</p></div>`;
+  const go = async () => {
+    saveCode(document.getElementById('code').value);
+    try { INFO = await api('/api/check'); route(); } catch (e) { askCode('That code didn\'t match. Check the spelling, e.g. word-word-1234.'); }
+  };
+  document.getElementById('go').onclick = go;
+  document.getElementById('code').onkeydown = e => e.key === 'Enter' && go();
+}
+
+window.addEventListener('hashchange', route);
+{ const m = location.hash.match(/^#code=([^&]+)/); if (m) { saveCode(decodeURIComponent(m[1])); history.replaceState(null, '', location.pathname + '#/'); } }
+(async () => { if (!code()) return askCode(); try { INFO = await api('/api/check'); route(); } catch {} })();
+
+function route() {
+  document.getElementById('brand').textContent = INFO.org_name ? `${INFO.org_name} · Meetings` : 'Meeting Agent';
+  const h = location.hash.slice(1) || '/';
+  if (h === '/new') return viewNew();
+  const m = h.match(/^\/m\/(.+)$/);
+  if (m) return viewMeeting(decodeURIComponent(m[1]));
+  viewHome();
+}
+
+/* ---------- home ---------- */
+async function viewHome() {
+  const list = await api('/api/meetings');
+  $app.innerHTML = `
+    <p class="eyebrow">${esc(INFO.org_name)} meetings</p><h1>Nobody has to take notes.</h1>
+    <p class="muted small" style="margin:4px 0 12px">Record → transcribed every minute → Claude writes the minutes → you approve the tasks.</p>
+    <a class="btn big" href="#/new" style="margin-bottom:14px">● Start a new meeting</a>
+    <div class="card"><h2>Meetings</h2>
+      ${list.length ? list.map(m => `<a class="mrow" href="#/m/${encodeURIComponent(m.id)}">
+        <div style="flex:1 1 auto"><div class="clip" style="font-weight:700">${esc(m.title)}</div>
+          <div class="small muted">${esc(longDate(m.date))}</div></div>
+        <div class="meta"><span class="pill ${esc(m.status)}">${esc(m.status)}</span>
+          ${m.tasks ? `<div>${m.tasks} tasks · ${m.approved} approved</div>` : ''}</div></a>`).join('')
+        : '<div class="empty">No meetings yet.</div>'}
+    </div>`;
+}
+
+/* ---------- recorder: 16 kHz mono PCM, sent as a WAV piece every minute ---------- */
+function wavBase64(int16) {
+  const buf = new ArrayBuffer(44 + int16.length * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + int16.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, RATE, true);
+  v.setUint32(28, RATE * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, int16.length * 2, true);
+  new Int16Array(buf, 44).set(int16);
+  const bytes = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function toInt16(floats, fromRate) {
+  const ratio = fromRate / RATE, n = Math.floor(floats.length / ratio), out = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.floor(i * ratio), b = Math.min(floats.length, Math.floor((i + 1) * ratio)); let s = 0;
+    for (let j = a; j < b; j++) s += floats[j];
+    const x = Math.max(-1, Math.min(1, s / Math.max(1, b - a)));
+    out[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
+  }
+  return out;
+}
+
+function viewNew() {
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  $app.innerHTML = `
+    <p class="eyebrow">New meeting</p><h1>Record a meeting</h1>
+    <div class="card" style="margin-top:10px">
+      <div class="row">
+        <div><label for="title">Meeting name</label><input id="title" type="text" value="Staff meeting"></div>
+        <div><label for="date">Date</label><input id="date" type="date" value="${today}"></div>
+      </div>
+      <div class="recbox">
+        <div id="state" class="muted small">Put this phone or laptop in the middle of the table. Tell everyone it's being recorded.</div>
+        <div class="timer" id="timer">00:00:00</div>
+        <button class="btn big" id="rec">● Start recording</button>
+        <div id="lvlWrap" hidden style="margin:10px auto 0;max-width:260px"><div class="small muted">Microphone level</div>
+          <div style="height:8px;background:var(--line);border-radius:4px;overflow:hidden"><i id="lvl" style="display:block;height:100%;width:0;background:var(--ok);transition:width .15s"></i></div></div>
+        <div class="small muted" id="pieces" style="margin-top:8px"></div>
+      </div>
+      <div id="liveWrap" hidden><label>Transcript so far (updates every minute)</label><div class="live" id="live"></div></div>
+      <div class="err" id="err"></div>
+    </div>`;
+  const $ = id => document.getElementById(id);
+  let id = null, ctx, stream, proc, src, wake, t0, tick, floats = [], nSamples = 0, pieceStart = 0, idx = 0;
+  const queue = [], done = []; let sending = false, prevText = '', stopped = false;
+
+  const status = () => { $('pieces').textContent = idx ? `${done.length} of ${idx} minute${idx === 1 ? '' : 's'} transcribed` : ''; };
+  const showLive = () => { $('liveWrap').hidden = !done.length;
+    $('live').innerHTML = done.slice().sort((a, b) => a.idx - b.idx).map(p => `<div><span class="ts">${fmt(p.start)}</span>${esc(p.text || '…')}</div>`).join('');
+    $('live').scrollTop = 1e9; };
+
+  async function pump() {
+    if (sending) return; sending = true;
+    while (queue.length) {
+      const p = queue[0]; let ok = false;
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+        try {
+          const q = new URLSearchParams({start: p.start.toFixed(1), end: p.end.toFixed(1), prev: prevText.slice(-150)});
+          const r = await api(`/api/meetings/${id}/pieces/${p.idx}?${q}`, {method: 'POST', headers: {'content-type': 'text/plain'}, body: p.b64});
+          prevText = r.text || prevText; done.push({idx: p.idx, start: p.start, text: r.text}); ok = true;
+        } catch (e) { await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); }
+      }
+      if (!ok) { $('err').textContent = `Minute ${p.idx + 1} could not be sent. Check the connection; it will retry.`; break; }
+      queue.shift(); status(); showLive();
+    }
+    sending = false;
+  }
+
+  function cut(final) {
+    if (!nSamples) return;
+    const all = new Float32Array(nSamples); let o = 0;
+    for (const f of floats) { all.set(f, o); o += f.length; }
+    floats = []; const seconds = nSamples / ctx.sampleRate; nSamples = 0;
+    if (final && seconds < 1) return;
+    queue.push({idx: idx++, start: pieceStart, end: pieceStart + seconds, b64: wavBase64(toInt16(all, ctx.sampleRate))});
+    pieceStart += seconds; status(); pump();
+  }
+
+  let starting = false, recording = false, beats = 0;
+  $('rec').onclick = async () => {
+    if (recording) return stop();
+    if (starting) return;                       // ignore double taps while setting up
+    starting = true; $('rec').disabled = true; $('err').textContent = ''; $('state').textContent = 'Starting…';
+    try {
+      // Record at the phone's own sample rate: forcing 16 kHz distorts the microphone in iPhone Safari.
+      // The page converts to 16 kHz itself (toInt16) before sending.
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: true, autoGainControl: true}});
+      await ctx.resume();
+      id = (await post('/api/meetings', {title: $('title').value, date: $('date').value})).id;
+      src = ctx.createMediaStreamSource(stream);
+      proc = ctx.createScriptProcessor(4096, 1, 1);
+      proc.onaudioprocess = e => {
+        const d = e.inputBuffer.getChannelData(0); floats.push(new Float32Array(d)); nSamples += d.length;
+        if (++beats % 3 === 0) { let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] * d[i];
+          $('lvl').style.width = `${Math.min(100, Math.round(Math.sqrt(s / (d.length / 4)) * 400))}%`; }
+        if (nSamples >= ctx.sampleRate * PIECE_SECONDS) cut(false);
+      };
+      src.connect(proc); proc.connect(ctx.destination);
+      try { wake = await navigator.wakeLock?.request('screen'); } catch {}
+      t0 = Date.now(); tick = setInterval(() => $('timer').textContent = fmt((Date.now() - t0) / 1000), 500);
+      recording = true;
+      $('state').innerHTML = '<span class="dot"></span>Recording… keep this screen open and unlocked.';
+      $('rec').textContent = '■ Stop & make minutes';
+      $('lvlWrap').hidden = false;
+    } catch (e) {
+      try { stream && stream.getTracks().forEach(t => t.stop()); ctx && ctx.close(); } catch {}
+      ctx = null; $('state').textContent = 'Not recording.';
+      $('err').textContent = e.message === 'Team code needed' ? '' : `Could not start (${e.message}). Allow the microphone and try again.`;
+    } finally { starting = false; $('rec').disabled = false; }
+  };
+
+  async function stop() {
+    if (stopped) return; stopped = true;
+    $('rec').disabled = true; clearInterval(tick);
+    try { proc.disconnect(); src.disconnect(); } catch {}
+    stream.getTracks().forEach(t => t.stop());
+    cut(true); try { wake && wake.release(); } catch {}
+    $('state').textContent = 'Sending the last minute…';
+    while (queue.length || sending) { await pump(); await new Promise(r => setTimeout(r, 500)); if (queue.length && !sending) await new Promise(r => setTimeout(r, 3000)); }
+    try { ctx.close(); } catch {}
+    $('state').innerHTML = '<span class="dot"></span>Claude is writing the minutes (about 30–60 seconds)…';
+    try { await post(`/api/meetings/${id}/finish`, {}); location.hash = '#/m/' + encodeURIComponent(id); }
+    catch (e) { $('err').innerHTML = `Couldn't make the minutes (${esc(e.message)}). <a href="#/m/${encodeURIComponent(id)}">Open the meeting</a> to retry.`; }
+  }
+}
+
+/* ---------- meeting ---------- */
+async function viewMeeting(id) {
+  if (ui.id !== id) Object.assign(ui, {id, tab: 'actions', open: new Set()});
+  let d; try { d = await api(`/api/meetings/${encodeURIComponent(id)}`); } catch (e) { $app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const y = window.scrollY;
+  const M = d.minutes, items = d.actions || [], tasks = items.filter(i => i.type === 'task');
+  const pending = items.filter(i => i.status === 'pending').length, approved = items.filter(i => i.status === 'approved').length;
+  const staff = [...INFO.staff, 'Unassigned'];
+  const tabBtn = (k, l, n) => `<button class="tab ${ui.tab === k ? 'on' : ''}" data-tab="${k}">${l}${n ? ` (${n})` : ''}</button>`;
+  const btns = it => it.status === 'pending'
+    ? `<button class="btn sm" data-set="approved">✓ Approve</button><button class="btn plain sm" data-set="skipped">✕</button>`
+    : `<span class="pill ${esc(it.status)}">${esc(it.status)}</span><button class="btn plain sm" data-set="pending">Undo</button>`;
+  const row = (it, sum, body) => `<details class="ar ${esc(it.status)}" data-key="${esc(it.key)}" ${ui.open.has(it.key) ? 'open' : ''}>
+    <summary><span class="k">${esc(it.key)}</span>${sum}<span class="btns">${btns(it)}</span></summary><div class="body">${body}</div></details>`;
+  const taskRow = it => row(it, `<span class="t" title="${esc(it.task)}">${esc(it.task)}</span><span class="m"><b>${esc(first(it.owner))}</b> · ${esc(shortDate(it.due_date))}</span>`, `
+      <label>Task</label><input type="text" data-f="task" value="${esc(it.task)}">
+      <div class="row"><div><label>Owner</label><select data-f="owner">${[...new Set([...staff, it.owner])].map(n => `<option ${n === it.owner ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
+        <div><label>Due</label><input type="date" data-f="due_date" value="${esc(it.due_date)}"></div>
+        <div><label>Priority</label><select data-f="priority">${['High', 'Normal', 'Low'].map(p => `<option ${p === it.priority ? 'selected' : ''}>${p}</option>`).join('')}</select></div></div>
+      ${it.quote ? `<div class="quote"><b>${esc(it.timestamp)}</b> “${esc(it.quote)}”</div>` : ''}`);
+  const inviteRow = it => row(it, `<span class="t">${esc(it.title)}</span><span class="m"><b>${esc(shortDate(it.date))}</b> ${esc(it.start_time)}</span>`, `
+      <label>Title</label><input type="text" data-f="title" value="${esc(it.title)}">
+      <div class="row"><div><label>Date</label><input type="date" data-f="date" value="${esc(it.date)}"></div>
+        <div><label>Start</label><input type="time" data-f="start_time" value="${esc(it.start_time)}"></div></div>
+      <div class="small muted" style="margin-top:6px">${esc((it.attendees || []).join(', '))} · ${esc(it.purpose)}</div>`);
+  const emailRow = it => row(it, `<span class="t">${esc(it.subject)}</span><span class="m">recap email</span>`, `
+      <label>Subject</label><input type="text" data-f="subject" value="${esc(it.subject)}"><label>Message</label><textarea data-f="body">${esc(it.body)}</textarea>`);
+
+  const actionsTab = !M ? '' : `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><span class="small muted" style="flex:1">${pending ? `${pending} waiting for review. Tap a row to edit.` : 'Everything reviewed.'}</span>
+      ${pending ? '<button class="btn ghost sm" id="all">✓ Approve all</button>' : ''}</div>
+    ${tasks.length ? `<h2>Tasks</h2>${tasks.map(taskRow).join('')}` : '<p class="muted">No tasks came out of this meeting.</p>'}
+    ${items.some(i => i.type === 'meeting') ? `<h2 style="margin-top:14px">Follow-up meetings</h2>${items.filter(i => i.type === 'meeting').map(inviteRow).join('')}` : ''}
+    ${items.some(i => i.type === 'email') ? `<h2 style="margin-top:14px">Recap email</h2>${items.filter(i => i.type === 'email').map(emailRow).join('')}` : ''}`;
+  const minutesTab = !M ? '' : `
+    <div class="card"><h2>Summary</h2><p style="margin:0">${esc(M.summary)}</p></div>
+    ${M.decisions.length ? `<div class="card"><h2>Decisions</h2><ul class="clean">${M.decisions.map(x => `<li>${esc(x.decision)} <span class="muted small">· ${esc(first(x.made_by))}</span></li>`).join('')}</ul></div>` : ''}
+    ${M.open_questions.length ? `<div class="card"><h2>Open questions</h2><ul class="clean">${M.open_questions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>` : ''}
+    <div class="card"><h2>Discussion notes</h2>${M.topics.map(t => `<details><summary><b>${esc(t.title)}</b></summary><ul class="clean">${t.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>`).join('')}</div>`;
+  const transcriptTab = `<div class="card live" style="max-height:60vh">${(d.pieces || []).map(p => `<div><span class="ts">${fmt(p.start_s)}</span>${esc(p.text || '(nothing heard)')}</div>`).join('') || 'No transcript.'}</div>`;
+
+  $app.innerHTML = `
+    <p class="eyebrow">${esc(longDate(d.date))}${d.cost ? ` · ~$${Number(d.cost).toFixed(2)}` : ''}</p>
+    <h1 class="clip">${esc(d.title)}</h1>
+    <p class="small muted" style="margin:4px 0 0">Speakers aren't separated (one microphone). Task owners come from names people said.</p>
+    ${d.status !== 'ready' ? `<div class="card" style="margin-top:10px"><span class="pill ${esc(d.status)}">${esc(d.status)}</span>
+       ${d.error ? `<p class="err">${esc(d.error)}</p>` : ''}
+       ${(d.pieces || []).length ? `<button class="btn" id="retry" style="margin-top:8px">${d.status === 'processing' ? 'Still working… check again' : 'Make the minutes'}</button>` : ''}</div>` : ''}
+    ${approved ? `<div class="card small" style="background:var(--ink);color:#fff;margin-top:10px"><b>${approved} approved</b>, waiting to be created in Zoho.</div>` : ''}
+    <div class="tabs">${M ? tabBtn('actions', 'Actions', pending) + tabBtn('minutes', 'Minutes') : ''}${tabBtn('transcript', 'Transcript')}</div>
+    <div>${!M || ui.tab === 'transcript' ? transcriptTab : ui.tab === 'minutes' ? minutesTab : actionsTab}</div>`;
+  window.scrollTo(0, y);
+
+  const enc = encodeURIComponent(id), again = () => viewMeeting(id);
+  $app.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; again(); });
+  $app.querySelectorAll('details.ar').forEach(el => el.addEventListener('toggle', () => el.open ? ui.open.add(el.dataset.key) : ui.open.delete(el.dataset.key)));
+  $app.querySelectorAll('[data-set]').forEach(b => b.onclick = async e => { e.preventDefault(); e.stopPropagation();
+    await post(`/api/meetings/${enc}/actions/${encodeURIComponent(b.closest('.ar').dataset.key)}`, {status: b.dataset.set}); again(); });
+  $app.querySelectorAll('.ar [data-f]').forEach(inp => inp.onchange = async () =>
+    post(`/api/meetings/${enc}/actions/${encodeURIComponent(inp.closest('.ar').dataset.key)}`, {[inp.dataset.f]: inp.value}));
+  const all = document.getElementById('all');
+  if (all) all.onclick = async () => { if (!confirm('Approve every item?')) return;
+    for (const it of items.filter(i => i.status === 'pending')) await post(`/api/meetings/${enc}/actions/${encodeURIComponent(it.key)}`, {status: 'approved'}); again(); };
+  const retry = document.getElementById('retry');
+  if (retry) retry.onclick = async () => { retry.disabled = true; retry.textContent = 'Claude is writing the minutes…';
+    try { await post(`/api/meetings/${enc}/finish`, {}); } catch (e) { alert(e.message); } again(); };
+}
+</script>
+</body>
+</html>

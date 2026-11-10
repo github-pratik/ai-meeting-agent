@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-device Whisper Test</title>
+<style>
+:root { --maroon:#92302C; --gold:#DCA235; --ink:#1A1918; --bg:#F7F6F4; --line:#e4e0da; --muted:#6b6661; --ok:#2f7a45; color-scheme: light; }
+* { box-sizing: border-box; min-width: 0; }
+html, body { overflow-x: hidden; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", Arial, sans-serif; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 12px 0; }
+label { display: block; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 4px; }
+select { width: 100%; padding: 8px; border: 1px solid #cfc9c1; border-radius: 6px; background: #fff; font: inherit; }
+.btn { border: 2px solid var(--maroon); background: var(--maroon); color: #fff; border-radius: 6px; padding: 8px 16px; font-weight: 700; font: inherit; font-weight: 700; cursor: pointer; }
+.btn.ghost { background: #fff; color: var(--maroon); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.timer { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 6px 0; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #c62828; margin-right: 6px; animation: p 1s infinite; }
+@keyframes p { 50% { opacity: .25; } }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+td { padding: 4px 0; border-top: 1px solid var(--line); } td:last-child { text-align: right; font-weight: 700; }
+#out div { margin: 4px 0; } .ts { color: var(--maroon); font-weight: 700; font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.err { color: #a12a1f; font-weight: 600; }
+.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 6px; } .bar i { display: block; height: 100%; background: var(--gold); width: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>On-device Whisper test</h1>
+  <p class="muted small" style="margin:0">Records, then turns speech into text <b>on this phone or laptop</b>. No server, no cost: the
+    audio never leaves the device. The model downloads once and is then cached.</p>
+
+  <div class="card">
+    <label for="model">Model</label>
+    <select id="model">
+      <option value="onnx-community/whisper-base">Whisper base: smallest, fastest (good first try on a phone)</option>
+      <option value="onnx-community/whisper-small" selected>Whisper small: more accurate, bigger download</option>
+      <option value="onnx-community/whisper-large-v3-turbo">Whisper large-v3-turbo: best, laptop + WebGPU only</option>
+    </select>
+    <div class="small muted" id="dev" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card" style="text-align:center">
+    <div id="state" class="muted small">Talk normally for 1–2 minutes. Say a task with a name and a day.</div>
+    <div class="timer" id="timer">00:00</div>
+    <button class="btn" id="rec">Start recording</button>
+  </div>
+
+  <div class="card" id="progCard" hidden>
+    <div id="prog" class="small"></div>
+    <div class="bar"><i id="barFill"></i></div>
+  </div>
+
+  <div class="card" id="resCard" hidden>
+    <label>Results (screenshot this)</label>
+    <table id="res"></table>
+  </div>
+
+  <div class="card" id="outCard" hidden>
+    <label>Transcript</label>
+    <div id="out"></div>
+  </div>
+  <p class="small muted">Engine: transformers.js 4.3.1 + ONNX Whisper (Hugging Face). Test page for the meeting agent.</p>
+</div>
+
+<script type="module">
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1/dist/transformers.min.js';
+env.allowLocalModels = false;  // always fetch from the Hugging Face hub (and cache in the browser)
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+let hasWebGPU = false;
+try { hasWebGPU = !!(navigator.gpu && await navigator.gpu.requestAdapter()); } catch (_) {}
+const mem = navigator.deviceMemory ? `${navigator.deviceMemory} GB+ RAM reported` : 'RAM not reported';
+$('dev').textContent = `This device: ${hasWebGPU ? 'WebGPU available (fast path)' : 'no WebGPU, using CPU (slower)'} · ${mem}`;
+if (!hasWebGPU) $('model').value = 'onnx-community/whisper-base';
+
+let recorder, chunks = [], t0 = 0, tick, wakeLock, cache = {};
+
+$('rec').onclick = async () => {
+  if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true } });
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => e.data.size && chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop()); clearInterval(tick);
+      try { wakeLock && wakeLock.release(); } catch (_) {}
+      $('rec').textContent = 'Record again'; $('rec').classList.add('ghost');
+      run(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }), (Date.now() - t0) / 1000);
+    };
+    recorder.start(1000); t0 = Date.now();
+    tick = setInterval(() => $('timer').textContent = fmt((Date.now() - t0) / 1000), 500);
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (_) {}
+    $('state').innerHTML = '<span class="dot"></span>Recording… keep this screen open';
+    $('rec').textContent = 'Stop recording'; $('rec').classList.remove('ghost');
+  } catch (e) {
+    $('state').innerHTML = `<span class="err">Microphone blocked: ${esc(e.message)}</span>`;
+  }
+};
+
+async function decode(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const data = buf.getChannelData(0).slice();
+  ctx.close();
+  return data;
+}
+
+async function run(blob, recSeconds) {
+  const model = $('model').value;
+  const device = hasWebGPU ? 'webgpu' : 'wasm';
+  const dtype = device === 'webgpu' ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8';
+  const rows = [['Device', `${device === 'webgpu' ? 'WebGPU' : 'CPU (WASM)'}`], ['Model', model.split('/')[1]], ['Audio length', `${recSeconds.toFixed(0)} s`]];
+  const show = () => { $('resCard').hidden = false; $('res').innerHTML = rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join(''); };
+  $('rec').disabled = true; $('progCard').hidden = false; $('outCard').hidden = true; show();
+  try {
+    $('prog').textContent = 'Preparing audio…';
+    const audio = await decode(blob);
+
+    const key = model + device;
+    let tLoad = performance.now();
+    if (!cache[key]) {
+      const files = {};
+      $('prog').textContent = 'Downloading the model (first time only)…';
+      cache[key] = await pipeline('automatic-speech-recognition', model, {
+        device, dtype,
+        progress_callback: p => {
+          if (p.status === 'progress' && p.total) {
+            files[p.file] = [p.loaded, p.total];
+            const [l, t] = Object.values(files).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+            $('prog').textContent = `Downloading the model (first time only): ${(l / 1e6).toFixed(0)} / ${(t / 1e6).toFixed(0)} MB`;
+            $('barFill').style.width = `${Math.round(100 * l / t)}%`;
+          }
+        },
+      });
+    }
+    const loadS = (performance.now() - tLoad) / 1000;
+    rows.push(['Model load', `${loadS.toFixed(1)} s${loadS < 2 ? ' (cached)' : ''}`]); show();
+
+    $('prog').textContent = 'Transcribing on this device…'; $('barFill').style.width = '100%';
+    const t1 = performance.now();
+    const out = await cache[key](audio, { chunk_length_s: 30, stride_length_s: 5, return_timestamps: true, language: 'english', task: 'transcribe' });
+    const tx = (performance.now() - t1) / 1000;
+    rows.push(['Transcribe time', `${tx.toFixed(1)} s`], ['Speed', `${(recSeconds / tx).toFixed(1)}× real time`],
+              ['1-hour meeting would take', `~${Math.ceil(3600 / (recSeconds / tx) / 60)} min`]);
+    show();
+    $('progCard').hidden = true; $('outCard').hidden = false;
+    const parts = out.chunks?.length ? out.chunks : [{ timestamp: [0], text: out.text }];
+    $('out').innerHTML = parts.map(c => `<div><span class="ts">${fmt(c.timestamp?.[0] ?? 0)}</span>${esc(c.text.trim())}</div>`).join('');
+    $('state').textContent = 'Done. Screenshot the results and transcript.';
+  } catch (e) {
+    console.error(e);
+    $('prog').innerHTML = `<span class="err">Failed: ${esc(e.message || e)}</span><br><span class="small muted">Try the smaller "base" model.</span>`;
+  } finally { $('rec').disabled = false; }
+}
+</script>
+</body>
+</html>
