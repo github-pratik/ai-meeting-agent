@@ -207,10 +207,16 @@ Anthropic Claude API (structured outputs, Zod) · vanilla JS + Web Audio
 
 **Actions:** Claude Code + MCP (Zoho CRM, Microsoft 365)
 
-## What's next
+## Roadmap (open issues, contributions welcome)
 
-- Keep the audio for playback beside each task's quote.
-- Weekly "open tasks from meetings" digest per person.
+- [#1](https://github.com/github-pratik/ai-meeting-agent/issues/1) Test the in-browser **Online call** capture on real Teams/Zoom/Meet calls
+- [#2](https://github.com/github-pratik/ai-meeting-agent/issues/2) Import **Microsoft Teams transcripts** automatically (real speaker names)
+- [#3](https://github.com/github-pratik/ai-meeting-agent/issues/3) Research: Meeting Agent **joins the call** as a notetaker
+- [#4](https://github.com/github-pratik/ai-meeting-agent/issues/4) **Two-way** Zoho task sync (due date, owner, reopen)
+- [#5](https://github.com/github-pratik/ai-meeting-agent/issues/5) Refresh **name hints** automatically *(good first issue)*
+- [#6](https://github.com/github-pratik/ai-meeting-agent/issues/6) Optional **desktop helper** for system audio (parked)
+- [#7](https://github.com/github-pratik/ai-meeting-agent/issues/7) Free **speaker separation** for in-room meetings
+- [#8](https://github.com/github-pratik/ai-meeting-agent/issues/8) Import a **Zoom / Meet transcript** file *(good first issue)*
 
 ---
 
