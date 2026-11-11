@@ -23,6 +23,7 @@ const SCHEMA = [
 // Columns added after the first release; existing meetings default to "everyone".
 const MEETING_COLUMNS: Record<string, string> = {
 	visibility: "TEXT DEFAULT 'everyone'", viewers: "TEXT DEFAULT '[]'", created_by: "TEXT DEFAULT ''",
+	participants: "TEXT DEFAULT '[]'",
 };
 let schemaReady = false;
 export async function db() {
@@ -43,7 +44,23 @@ export function org(): Org {
 
 // ---------- access ----------
 export type MeetingRow = { id: string; title: string; date: string; created_at: number; status: string; error: string | null;
-	minutes: string | null; cost: number | null; visibility: string; viewers: string; created_by: string };
+	minutes: string | null; cost: number | null; visibility: string; viewers: string; created_by: string; participants: string };
+
+// Who was in the meeting: staff (by email) and guests (name + company). Helps Claude assign owners.
+export type Participant = { name: string; email?: string; role?: string; org?: string; guest: boolean };
+const participantsOf = (m: { participants?: string | null }): Participant[] => { try { return JSON.parse(m.participants || "[]"); } catch { return []; } };
+function cleanParticipants(o: Org, list: unknown): Participant[] {
+	const out: Participant[] = [], seen = new Set<string>();
+	const cut = (v: unknown, n = 80) => typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n) : "";
+	for (const raw of Array.isArray(list) ? list.slice(0, 30) : []) {
+		const r = (typeof raw === "string" ? { email: raw } : raw || {}) as Record<string, unknown>;
+		const s = typeof r.email === "string" ? staffByEmail(o, r.email) : undefined;
+		if (s?.email) { if (!seen.has(s.email)) { seen.add(s.email); out.push({ name: s.name, email: s.email.toLowerCase(), role: s.role, guest: false }); } continue; }
+		const name = cut(r.name), org = cut(r.org);
+		if (name && !seen.has(`${name}|${org}`.toLowerCase())) { seen.add(`${name}|${org}`.toLowerCase()); out.push({ name, org, guest: true }); }
+	}
+	return out;
+}
 
 const viewersOf = (m: MeetingRow): string[] => { try { return JSON.parse(m.viewers || "[]"); } catch { return []; } };
 export const canSee = (u: User, m: MeetingRow) =>
@@ -75,14 +92,15 @@ export async function loadMeeting(u: User, id: string) {
 }
 
 // ---------- meetings ----------
-export async function createMeeting(u: User, b: { title?: string; date?: string; visibility?: string; viewers?: string[] }) {
+export async function createMeeting(u: User, b: { title?: string; date?: string; visibility?: string; viewers?: string[]; participants?: unknown }) {
 	const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date! : new Date().toISOString().slice(0, 10);
 	const id = `${date}-${crypto.randomUUID().slice(0, 8)}`;
 	const a = cleanAccess(org(), b.visibility, b.viewers, u.email);
-	await (await db()).prepare(`INSERT INTO meetings (id, title, date, created_at, status, visibility, viewers, created_by)
-		VALUES (?, ?, ?, ?, 'recording', ?, ?, ?)`)
-		.bind(id, (b.title || "Meeting").slice(0, 120), date, Date.now(), a.visibility, JSON.stringify(a.viewers), u.email).run();
-	return { id, ...a };
+	const participants = cleanParticipants(org(), b.participants);
+	await (await db()).prepare(`INSERT INTO meetings (id, title, date, created_at, status, visibility, viewers, created_by, participants)
+		VALUES (?, ?, ?, ?, 'recording', ?, ?, ?, ?)`)
+		.bind(id, (b.title || "Meeting").slice(0, 120), date, Date.now(), a.visibility, JSON.stringify(a.viewers), u.email, JSON.stringify(participants)).run();
+	return { id, ...a, participants };
 }
 
 export async function setAccess(u: User, id: string, b: { visibility?: string; viewers?: string[] }) {
@@ -93,13 +111,15 @@ export async function setAccess(u: User, id: string, b: { visibility?: string; v
 	return accessInfo(org(), { ...m, visibility: a.visibility, viewers: JSON.stringify(a.viewers) });
 }
 
-export async function updateMeeting(u: User, id: string, b: { title?: string; date?: string }) {
+export async function updateMeeting(u: User, id: string, b: { title?: string; date?: string; participants?: unknown }) {
 	const m = await loadMeeting(u, id);
 	if (!canManage(u, m)) throw new HttpError(403, "Only the person who started this meeting (or an admin) can edit it");
 	const title = typeof b.title === "string" && b.title.trim() ? b.title.trim().slice(0, 120) : m.title;
 	const date = /^\d{4}-\d{2}-\d{2}$/.test(b.date || "") ? b.date! : m.date;
-	await (await db()).prepare("UPDATE meetings SET title = ?, date = ? WHERE id = ?").bind(title, date, id).run();
-	return { id, title, date };
+	const participants = Array.isArray(b.participants) ? cleanParticipants(org(), b.participants) : participantsOf(m);
+	await (await db()).prepare("UPDATE meetings SET title = ?, date = ?, participants = ? WHERE id = ?")
+		.bind(title, date, JSON.stringify(participants), id).run();
+	return { id, title, date, participants };
 }
 
 export async function deleteMeeting(u: User, id: string) {
@@ -181,7 +201,7 @@ export async function finish(u: User, id: string) {
 	}
 	await d.prepare("UPDATE meetings SET status='processing', error=NULL WHERE id=?").bind(id).run();
 	try {
-		const { minutes, cost } = await writeMinutes(env.ANTHROPIC_API_KEY, org(), m.title, m.date, pieces, await getHints());
+		const { minutes, cost } = await writeMinutes(env.ANTHROPIC_API_KEY, org(), m.title, m.date, pieces, await getHints(), participantsOf(m));
 		await d.batch([
 			d.prepare("UPDATE meetings SET status='ready', minutes=?, cost=? WHERE id=?").bind(JSON.stringify(minutes), cost, id),
 			d.prepare("DELETE FROM actions WHERE meeting_id=? AND status IN ('pending','approved','skipped')").bind(id),
@@ -230,7 +250,8 @@ export async function listMeetings(u: User, limit = 100, status?: string) {
 	   FROM meetings m ORDER BY m.created_at DESC LIMIT 500`).all<MeetingRow & { tasks: number; approved: number }>();
 	const o = org();
 	return r.results.filter(m => canSee(u, m) && (!status || m.status === status)).slice(0, limit)
-		.map(m => { const { viewers: _v, created_by: _c, ...rest } = m; return { ...rest, access: accessInfo(o, m) }; });
+		.map(m => { const { viewers: _v, created_by: _c, participants: _p, ...rest } = m;
+			return { ...rest, participants: participantsOf(m), access: accessInfo(o, m) }; });
 }
 
 export async function getMeeting(u: User, id: string) {
@@ -239,8 +260,8 @@ export async function getMeeting(u: User, id: string) {
 	const pieces = (await d.prepare("SELECT idx, start_s, end_s, text FROM pieces WHERE meeting_id=? ORDER BY idx").bind(id).all()).results;
 	const actions = (await d.prepare("SELECT key, type, status, data FROM actions WHERE meeting_id=? ORDER BY rowid").bind(id).all<{ key: string; type: string; status: string; data: string }>())
 		.results.map(a => ({ key: a.key, type: a.type, status: a.status, ...JSON.parse(a.data) }));
-	const { viewers: _v, created_by: _c, ...rest } = m;
-	return { ...rest, minutes: m.minutes ? JSON.parse(m.minutes) : null, pieces, actions,
+	const { viewers: _v, created_by: _c, participants: _p, ...rest } = m;
+	return { ...rest, participants: participantsOf(m), minutes: m.minutes ? JSON.parse(m.minutes) : null, pieces, actions,
 		access: accessInfo(org(), m), can_manage: canManage(u, m) };
 }
 

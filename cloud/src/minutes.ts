@@ -7,7 +7,8 @@ export const MODEL = "claude-opus-5-5";
 const ActionItem = z.object({
 	id: z.string().describe("A1, A2, ..."),
 	task: z.string().describe("Imperative, specific, self-contained task title"),
-	owner: z.string().describe("Full staff name, or 'Unassigned' if no name was said"),
+	owner: z.string().describe("Full staff name, a guest as 'Name (Company)', or 'Unassigned'"),
+	owner_basis: z.enum(["named", "inferred", "none"]).describe("named = the owner's name was said; inferred = worked out from who was asked and who answered; none = Unassigned"),
 	due_date: z.string().describe("YYYY-MM-DD resolved from the meeting date, or ''"),
 	due_text: z.string().describe("How the deadline was said, or ''"),
 	priority: z.enum(["High", "Normal", "Low"]),
@@ -52,8 +53,15 @@ Turn a meeting transcript into accurate minutes that staff can act on.
 Rules:
 - Only record what was actually said. Never invent tasks, owners, dates or decisions.
 - An action item is a concrete commitment or request someone accepted. Ideas, status updates and complaints are not actions.
-- The transcript has NO speaker labels (one microphone in the room). Take a task owner ONLY from a name actually
-  spoken (e.g. "Sam, can you..." followed by agreement). Never guess an owner from who seems to be talking; use 'Unassigned'.
+- The transcript has NO speaker labels (one microphone in the room). Take a task owner from a name actually
+  spoken (e.g. "Sam, can you..." followed by agreement): owner_basis "named".
+- If an attendee list is given and has 4 people or fewer, you may also work out the owner of a first-person
+  commitment ("I'll send it Friday") from the flow of the conversation: who was asked, who answered, which side
+  each person is on (staff vs. a guest's company). Set owner_basis "inferred". Only do this when the flow makes it
+  clear; otherwise use 'Unassigned' with owner_basis "none". Never infer with 5+ attendees or no attendee list.
+- Guests (outside people) can own commitments too; write them as 'Name (Company)'. A guest's commitment is still
+  an action item, so staff can track it.
+- If attendees are given, name them in the recap email's first line.
 - Resolve relative dates against the meeting date. 'This week' with no day = the Friday of the meeting week.
 - A follow-up meeting only counts if a day or time was agreed. List it under follow_up_meetings only, not also as an action item.
 - Open questions = things someone explicitly raised and left undecided. Do not add your own concerns.
@@ -68,7 +76,8 @@ Rules:
 const ts = (s: number) => new Date(Math.max(0, s) * 1000).toISOString().substring(11, 19);
 
 export async function writeMinutes(apiKey: string, org: Org, title: string, date: string,
-	pieces: { start_s: number; text: string }[], hints?: Hints | null) {
+	pieces: { start_s: number; text: string }[], hints?: Hints | null,
+	attendees: { name: string; role?: string; org?: string; guest: boolean }[] = []) {
 	const day = new Date(`${date}T12:00:00Z`);
 	const weekday = day.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
 	const transcript = pieces.map(p => `[${ts(p.start_s)}] ${p.text}`).join("\n");
@@ -76,6 +85,7 @@ export async function writeMinutes(apiKey: string, org: Org, title: string, date
 Meeting date: ${date} (${weekday})
 Staff list: ${org.staff.map(s => `${s.name} (${s.role}; also called ${(s.aliases || []).join(", ") || "-"})`).join("; ")}
 Vocabulary: ${org.vocabulary.join(", ")}` +
+		(attendees.length ? `\nAttendees (${attendees.length}): ${attendees.map(a => a.guest ? `${a.name} (guest${a.org ? `, ${a.org}` : ""})` : `${a.name} (staff, ${a.role || ""})`).join("; ")}` : "\nAttendees: not given") +
 		(hints?.people?.length ? `\nKnown people (CRM spelling; note = lead or batch): ${hints.people.map(p => p.note ? `${p.name} [${p.note}]` : p.name).join("; ")}` : "") +
 		(hints?.employers?.length ? `\nKnown employers: ${hints.employers.join("; ")}` : "");
 

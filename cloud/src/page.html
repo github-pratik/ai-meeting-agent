@@ -74,6 +74,8 @@ ul.clean { margin: 0; padding-left: 18px; } ul.clean li { margin: 3px 0; }
 .people input { accent-color: var(--maroon); }
 .lock { display: inline-block; font-size: 11px; font-weight: 700; color: var(--maroon); background: #f6eceb; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .who { font-size: 13px; color: var(--muted); }
+.guest { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 6px; align-items: center; }
+.pill.inferred { background: #eef2f8; color: #3a5a8c; text-transform: none; }
 </style>
 </head>
 <body>
@@ -150,6 +152,46 @@ function readAccess(root) {
   const vis = root.querySelector('input[name=vis]:checked').value;
   return {visibility: vis, viewers: vis === 'private' ? [...root.querySelectorAll('.people input:checked')].map(i => i.value) : []};
 }
+/* who's in the meeting: staff checkboxes + outside guests (name, company) */
+const guestLabel = g => g.org ? `${g.name} (${g.org})` : g.name;
+const peopleLabel = list => (list || []).map(p => p.guest ? guestLabel(p) : first(p.name)).join(', ');
+function peopleFields({participants, defaultMe}) {
+  const me = INFO.me?.email, list = participants || [];
+  const ticked = new Set(list.filter(p => !p.guest).map(p => p.email));
+  if (defaultMe && me) ticked.add(me);
+  const guestRow = g => `<div class="guest"><input type="text" class="gname" placeholder="Guest name" value="${esc(g.name || '')}">
+    <input type="text" class="gorg" placeholder="Company" value="${esc(g.org || '')}"><button type="button" class="btn plain sm gdel" aria-label="Remove guest">✕</button></div>`;
+  return `<label style="margin-top:12px">Who's in this meeting?</label>
+    <div class="people">${INFO.staff.map(p => `<label><input type="checkbox" class="att" value="${esc(p.email)}" ${ticked.has(p.email) ? 'checked' : ''}>${esc(p.name)}${p.email === me ? ' (you)' : ''}</label>`).join('')}</div>
+    <div class="guests">${list.filter(p => p.guest).map(guestRow).join('')}</div>
+    <button type="button" class="btn ghost sm addguest" style="margin-top:8px">+ Add guest (outside person)</button>
+    <p class="small muted" style="margin:6px 0 0">With 4 or fewer people, Claude can tell who promised what from the conversation, not just from names said.</p>`;
+}
+function wirePeople(root) {
+  const add = () => { const d = document.createElement('div'); d.innerHTML = `<div class="guest"><input type="text" class="gname" placeholder="Guest name">
+    <input type="text" class="gorg" placeholder="Company"><button type="button" class="btn plain sm gdel" aria-label="Remove guest">✕</button></div>`;
+    root.querySelector('.guests').appendChild(d.firstChild); root.querySelector('.guests .guest:last-child .gname').focus(); };
+  root.querySelector('.addguest').onclick = add;
+  root.querySelector('.guests').onclick = e => { if (e.target.classList.contains('gdel')) e.target.closest('.guest').remove(); };
+}
+function readPeople(root) {
+  return [...[...root.querySelectorAll('.att:checked')].map(i => ({email: i.value})),
+    ...[...root.querySelectorAll('.guest')].map(g => ({name: g.querySelector('.gname').value.trim(), org: g.querySelector('.gorg').value.trim()})).filter(g => g.name)];
+}
+function peopleModal(participants) {
+  return new Promise(resolve => {
+    const bg = document.createElement('div'); bg.className = 'modal-bg';
+    bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="pt"><h2 id="pt">Who was in this meeting</h2>
+      ${peopleFields({participants})}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn plain" id="pcancel">Cancel</button><button class="btn" id="pok">Save</button></div></div>`;
+    document.body.appendChild(bg); wirePeople(bg);
+    const close = v => { bg.remove(); resolve(v); };
+    bg.querySelector('#pcancel').onclick = () => close(null);
+    bg.onclick = e => { if (e.target === bg) close(null); };
+    bg.querySelector('#pok').onclick = () => close(readPeople(bg));
+  });
+}
 function accessModal({visibility, viewers, creator}) {
   return new Promise(resolve => {
     const bg = document.createElement('div'); bg.className = 'modal-bg';
@@ -214,6 +256,7 @@ function viewNew() {
         <div><label for="title">Meeting name</label><input id="title" type="text" value="Staff meeting"></div>
         <div><label for="date">Date</label><input id="date" type="date" value="${today}"></div>
       </div>
+      <div id="people">${peopleFields({defaultMe: true})}</div>
       <div id="access">${accessFields({})}</div>
       <div class="recbox">
         <div id="state" class="muted small">Put this phone or laptop in the middle of the table. Tell everyone it's being recorded.</div>
@@ -228,7 +271,11 @@ function viewNew() {
       <div class="err" id="err"></div>
     </div>`;
   const $ = id => document.getElementById(id);
-  wireAccess($('access'));
+  wireAccess($('access')); wirePeople($('people'));
+  // Picking "Private" starts from the staff ticked as attendees
+  $('access').querySelector('input[value=private]').addEventListener('change', () => {
+    const att = new Set([...$('people').querySelectorAll('.att:checked')].map(i => i.value));
+    $('access').querySelectorAll('.people input:not(:disabled)').forEach(i => i.checked = att.has(i.value)); });
   let id = null, ctx, stream, proc, src, wake, t0, tick, floats = [], nSamples = 0, pieceStart = 0, idx = 0;
   const queue = [], done = []; let sending = false, prevText = '', stopped = false;
 
@@ -268,7 +315,7 @@ function viewNew() {
   $('rec').onclick = async () => {
     if (recording) return stop();
     if (starting) return;                       // ignore double taps while setting up
-    const pick = readAccess($('access'));
+    const pick = readAccess($('access')), people = readPeople($('people'));
     starting = true; $('rec').disabled = true; $('err').textContent = ''; $('state').textContent = 'Starting…';
     try {
       // Record at the phone's own sample rate: forcing 16 kHz distorts the microphone in iPhone Safari.
@@ -276,9 +323,10 @@ function viewNew() {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: true, autoGainControl: true}});
       await ctx.resume();
-      const made = await post('/api/meetings', {title: $('title').value, date: $('date').value, visibility: pick.visibility, viewers: pick.viewers});
+      const made = await post('/api/meetings', {title: $('title').value, date: $('date').value, visibility: pick.visibility, viewers: pick.viewers, participants: people});
       id = made.id;
-      $('access').hidden = true; $('title').disabled = $('date').disabled = true; // fixed once recording starts; change later from the meeting page
+      $('access').hidden = true; $('people').hidden = true;
+      if (made.participants.length) $('who').insertAdjacentHTML('beforebegin', `<div class="who">In this meeting: ${esc(peopleLabel(made.participants))}</div>`); $('title').disabled = $('date').disabled = true; // fixed once recording starts; change later from the meeting page
       $('who').innerHTML = made.visibility === 'private' ? `🔒 Private · ${esc(made.viewers.map(e => first(nameOf(e))).join(', '))}` : 'Visible to everyone on staff';
       src = ctx.createMediaStreamSource(stream);
       proc = ctx.createScriptProcessor(4096, 1, 1);
@@ -324,14 +372,14 @@ async function viewMeeting(id) {
   const y = window.scrollY;
   const M = d.minutes, items = d.actions || [], tasks = items.filter(i => i.type === 'task');
   const pending = items.filter(i => i.status === 'pending').length, approved = items.filter(i => i.status === 'approved').length;
-  const staff = [...names(), 'Unassigned'];
+  const staff = [...names(), ...(d.participants || []).filter(p => p.guest).map(guestLabel), 'Unassigned'];
   const tabBtn = (k, l, n) => `<button class="tab ${ui.tab === k ? 'on' : ''}" data-tab="${k}">${l}${n ? ` (${n})` : ''}</button>`;
   const btns = it => it.status === 'pending'
     ? `<button class="btn sm" data-set="approved">✓ Approve</button><button class="btn plain sm" data-set="skipped">✕</button>`
     : `<span class="pill ${esc(it.status)}">${esc(it.status)}</span><button class="btn plain sm" data-set="pending">Undo</button>`;
   const row = (it, sum, body) => `<details class="ar ${esc(it.status)}" data-key="${esc(it.key)}" ${ui.open.has(it.key) ? 'open' : ''}>
     <summary><span class="k">${esc(it.key)}</span>${sum}<span class="btns">${btns(it)}</span></summary><div class="body">${body}</div></details>`;
-  const taskRow = it => row(it, `<span class="t" title="${esc(it.task)}">${esc(it.task)}</span><span class="m"><b>${esc(first(it.owner))}</b> · ${esc(shortDate(it.due_date))}</span>`, `
+  const taskRow = it => row(it, `<span class="t" title="${esc(it.task)}">${esc(it.task)}</span><span class="m"><b>${esc(first(it.owner))}</b>${it.owner_basis === 'inferred' ? ' <span class="pill inferred" title="Worked out from the conversation. Check it.">inferred</span>' : ''} · ${esc(shortDate(it.due_date))}</span>`, `
       <label>Task</label><input type="text" data-f="task" value="${esc(it.task)}">
       <div class="row"><div><label>Owner</label><select data-f="owner">${[...new Set([...staff, it.owner])].map(n => `<option ${n === it.owner ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
         <div><label>Due</label><input type="date" data-f="due_date" value="${esc(it.due_date)}"></div>
@@ -363,7 +411,9 @@ async function viewMeeting(id) {
     <h1 class="clip">${esc(d.title)}</h1>
     <p class="small" style="margin:6px 0 0">${d.access?.visibility === 'private' ? `<span class="lock">🔒 ${esc(accessLabel(d.access))}</span>` : '<span class="who">Visible to everyone on staff</span>'}
       ${d.can_manage ? ' <button class="btn plain sm" id="chacc">Change</button>' : ''}</p>
-    <p class="small muted" style="margin:4px 0 0">Speakers aren't separated (one microphone). Task owners come from names people said.</p>
+    <p class="small" style="margin:4px 0 0"><span class="who">In this meeting: ${d.participants?.length ? esc(peopleLabel(d.participants)) : 'not listed'}</span>
+      ${d.can_manage ? ' <button class="btn plain sm" id="chppl">Edit</button>' : ''}</p>
+    <p class="small muted" style="margin:4px 0 0">Speakers aren't separated (one microphone). Owners come from names people said, or, with 4 or fewer people listed, from the conversation (marked “inferred”).</p>
     ${d.status !== 'ready' ? `<div class="card" style="margin-top:10px"><span class="pill ${esc(d.status)}">${esc(d.status)}</span>
        ${d.error ? `<p class="err">${esc(d.error)}</p>` : ''}
        ${(d.pieces || []).length ? `<button class="btn" id="retry" style="margin-top:8px">${d.status === 'processing' ? 'Still working… check again' : 'Make the minutes'}</button>` : ''}</div>` : ''}
@@ -382,6 +432,17 @@ async function viewMeeting(id) {
   const all = document.getElementById('all');
   if (all) all.onclick = async () => { if (!confirm('Approve every item?')) return;
     for (const it of items.filter(i => i.status === 'pending')) await post(`/api/meetings/${enc}/actions/${encodeURIComponent(it.key)}`, {status: 'approved'}); again(); };
+  const chppl = document.getElementById('chppl');
+  if (chppl) chppl.onclick = async () => {
+    const list = await peopleModal(d.participants || []);
+    if (!list) return;
+    try { await api(`/api/meetings/${enc}`, {method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify({participants: list})}); }
+    catch (e) { alert(e.message); return again(); }
+    if (d.minutes && confirm('Saved. Re-make the minutes now so Claude uses the new list? Approved items stay approved only if they were already created; others go back to review. (Takes a minute or more.)')) {
+      $app.insertAdjacentHTML('afterbegin', '<div class="card small">Claude is re-writing the minutes…</div>');
+      try { await post(`/api/meetings/${enc}/finish`, {}); } catch (e) { alert(e.message); }
+    }
+    again(); };
   const chacc = document.getElementById('chacc');
   if (chacc) chacc.onclick = async () => {
     const pick = await accessModal({visibility: d.access.visibility, viewers: d.access.viewers.map(v => v.email), creator: d.access.created_by?.email});

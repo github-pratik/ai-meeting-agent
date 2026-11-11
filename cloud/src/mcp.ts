@@ -71,8 +71,10 @@ const TOOLS: Tool[] = [
 	},
 	{
 		name: "update_meeting",
-		description: "Rename a meeting or change its date.",
-		inputSchema: { type: "object", required: ["id"], properties: { ...id, title: str("New title"), date: str("YYYY-MM-DD") } },
+		description: "Rename a meeting, change its date, or set who was in it (attendees help Claude assign task owners on the next regenerate_minutes).",
+		inputSchema: { type: "object", required: ["id"], properties: { ...id, title: str("New title"), date: str("YYYY-MM-DD"),
+			participants: { type: "array", description: "Replaces the list. Staff: {email}. Guests: {name, org}.",
+				items: { type: "object", properties: { email: { type: "string" }, name: { type: "string" }, org: { type: "string" } } } } } },
 		run: (u, a) => updateMeeting(u, a.id, a),
 	},
 	{
