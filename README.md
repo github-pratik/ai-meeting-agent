@@ -58,6 +58,24 @@ converts it to 16 kHz WAV itself, and uploads one piece every 60 seconds (retryi
 piece is transcribed while the meeting is still going, so minutes are ready about 15 seconds after Stop.
 The Worker does almost no CPU work, which keeps it inside the free plan's limits.
 
+## Tasks people actually own
+
+A proposed task isn't anyone's job until its owner accepts it.
+
+- **The owner accepts.** Only the named person (or a manager) can accept or edit their task. Handing an accepted task to
+  someone else sends it back for them to accept. Unassigned tasks need a staff owner first; guests' commitments become a
+  follow-up for the staff member who met them.
+- **My tasks.** Each person has a page of tasks waiting for them, accepted, and recently done.
+- **It lands where work is already tracked.** Accepting creates a Zoho CRM task for the owner (Zoho emails them) and a row
+  in their tab of the team's Excel task plan on SharePoint. Edits, hand-offs, undo and deleting the meeting are mirrored;
+  accepted follow-up meetings become Zoho calendar events with the staff invited.
+- **Done flows both ways.** Mark it done in the app or close it in Zoho; a 15-minute Cloudflare cron pulls completions back
+  and updates the sheet. It also retries anything that failed.
+- **Safe by design.** The app owns one small table per tab and never touches rows people typed. Each item syncs one at a
+  time (a short lock plus a version number), writes back only its own fields, and every Excel change runs in one workbook
+  session so reads see the latest writes. Microsoft access is an Entra app with `Sites.Selected`, granted write on one
+  SharePoint site only; Zoho access is a Self Client limited to Tasks, Events and reading users.
+
 ## Key decisions, and why
 
 - **Human approval before every write.** The AI proposes; a person decides. Wrong owners or invented tasks
@@ -142,6 +160,10 @@ cp .env.secrets.example.json .env.secrets.json   # fill in keys, Zoho client, ad
 cf deploy --secrets-file .env.secrets.json
 ```
 
+**Task sync (optional).** Fill the `ZOHO_*` keys (Self Client: `ZohoCRM.modules.Tasks.ALL,ZohoCRM.modules.Events.ALL,ZohoCRM.users.READ`)
+and/or the `MS_*` keys (Entra app with Application permission `Sites.Selected`, then grant it `write` on your site with
+`POST /sites/{site-id}/permissions`). Give each staff entry a `sheet_tab`. Leave a side empty to switch it off.
+
 Staff sign in with Zoho. Register a **server-based** client at https://api-console.zoho.com with redirect URI
 `https://<your-worker>/auth/callback` and put its id and secret in `.env.secrets.json`. Each staff entry in
 `ORG_CONFIG` needs the `email` they sign in with; `"access": "all"` lets someone see every meeting.
@@ -153,7 +175,7 @@ claude mcp add --transport http --scope local meeting-agent https://<your-worker
 ```
 
 Tools: `list_meetings`, `get_meeting`, `get_transcript`, `list_approved_actions`, `update_action`, `regenerate_minutes`,
-`set_meeting_access`, `update_meeting`, `delete_meeting`, `list_staff`, `get_name_hints`, `set_name_hints`, `app_status`.
+`set_meeting_access`, `update_meeting`, `delete_meeting`, `list_staff`, `get_name_hints`, `set_name_hints`, `sync_now`, `app_status`.
 A typical run: list approved items → create each one in the CRM or Outlook (with the user's OK) → `update_action`
 marks it done, and the web page shows it.
 

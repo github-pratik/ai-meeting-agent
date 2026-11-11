@@ -75,12 +75,15 @@ ul.clean { margin: 0; padding-left: 18px; } ul.clean li { margin: 3px 0; }
 .lock { display: inline-block; font-size: 11px; font-weight: 700; color: var(--maroon); background: #f6eceb; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .who { font-size: 13px; color: var(--muted); }
 .guest { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 6px; align-items: center; }
+.pill.done { background: var(--ok-bg); color: var(--ok); }
+.sync { font-size: 12px; color: var(--muted); margin-top: 6px; } .sync b { color: var(--ok); } .sync .bad { color: #a12a1f; font-weight: 600; }
+.wait { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .pill.inferred { background: #eef2f8; color: #3a5a8c; text-transform: none; }
 </style>
 </head>
 <body>
 <header><div class="wrap"><a href="#/" class="brand" style="text-decoration:none" id="brand">Meeting Agent</a>
-  <nav><span class="small muted clip" id="me" style="align-self:center;max-width:110px"></span><a class="btn plain sm" href="#/">Meetings</a><a class="btn sm" href="#/new">+ New</a></nav></div></header>
+  <nav><span class="small muted clip" id="me" style="align-self:center;max-width:110px"></span><a class="btn plain sm" href="#/mine">My tasks</a><a class="btn plain sm" href="#/">Meetings</a><a class="btn sm" href="#/new">+ New</a></nav></div></header>
 <div class="stripe"></div>
 <main><div class="wrap" id="app"></div></main>
 <script>
@@ -122,6 +125,7 @@ function route() {
   if (INFO.me) document.getElementById('me').innerHTML = `${esc(first(INFO.me.name))} · <a href="/auth/logout">Sign out</a>`;
   const h = location.hash.slice(1) || '/';
   if (h === '/new') return viewNew();
+  if (h === '/mine') return viewMine();
   const m = h.match(/^\/m\/(.+)$/);
   if (m) return viewMeeting(decodeURIComponent(m[1]));
   viewHome();
@@ -207,12 +211,67 @@ function accessModal({visibility, viewers, creator}) {
   });
 }
 
+/* ---------- accept / done buttons, shared by the meeting page and My tasks ---------- */
+const statusLabel = s => ({approved: 'accepted', done: 'done', skipped: 'skipped', created: 'created', draft: 'draft', sent: 'sent'})[s] || s;
+function actionButtons(it) {
+  const mine = it.type === 'task' && INFO.me && it.owner === INFO.me.name;
+  if (it.status === 'pending') return it.can_decide
+    ? `<button class="btn sm" data-set="approved">✓ ${mine || it.type !== 'task' ? 'Accept' : 'Approve'}</button><button class="btn plain sm" data-set="skipped" title="Skip">✕</button>`
+    : `<span class="wait">Waiting for ${esc(it.type === 'task' ? first(it.owner === 'Unassigned' ? 'an owner' : it.owner) : 'an attendee')}</span>`;
+  const pill = `<span class="pill ${esc(it.status)}">${esc(statusLabel(it.status))}</span>`;
+  if (!it.can_decide) return pill;
+  if (it.status === 'approved' && it.type === 'task') return `${pill}<button class="btn sm" data-set="done">✓ Done</button><button class="btn plain sm" data-set="pending" title="Un-accept: removes it from Zoho and the sheet">Undo</button>`;
+  return `${pill}<button class="btn plain sm" data-set="${it.status === 'done' ? 'approved' : 'pending'}">Undo</button>`;
+}
+function syncLine(it) {
+  if (!['approved', 'done'].includes(it.status) || !['task', 'meeting'].includes(it.type)) return '';
+  if (!INFO.sync?.zoho && !INFO.sync?.sheet) return '';
+  if (it.sync_error) return `<div class="sync"><span class="bad">Sync problem:</span> ${esc(it.sync_error)} <span class="muted">(retries every 15 min)</span></div>`;
+  if (Number(it.rev || 0) !== Number(it.synced_rev ?? -1)) return '<div class="sync">Syncing…</div>';
+  const parts = [];
+  if (it.zoho_id) parts.push(`<b>✓</b> ${it.type === 'meeting' ? 'Zoho calendar' : 'Zoho task'}`);
+  if (it.sheet_tab) parts.push(`<b>✓</b> Time Task Plan (${esc(it.sheet_tab)} tab)`);
+  if (it.done_in === 'zoho') parts.push('marked done in Zoho');
+  return parts.length ? `<div class="sync">${parts.join(' · ')}</div>` : '';
+}
+function wireActionButtons(root, encOf, again) {
+  root.querySelectorAll('[data-set]').forEach(b => b.onclick = async e => { e.preventDefault(); e.stopPropagation();
+    const row = b.closest('[data-key]');
+    try { await post(`/api/meetings/${encOf(row)}/actions/${encodeURIComponent(row.dataset.key)}`, {status: b.dataset.set}); }
+    catch (err) { alert(err.message); }
+    again(); setTimeout(again, 4000); });   // the sync runs in the background; refresh to show its result
+}
+
+/* ---------- my tasks ---------- */
+async function viewMine() {
+  const list = await api('/api/my-tasks');
+  const group = (title, rows) => rows.length ? `<h2 style="margin-top:14px">${title}</h2>${rows.map(t => `
+    <div class="card" data-key="${esc(t.key)}" data-mid="${esc(t.meeting_id)}" style="padding:10px 12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b style="flex:1 1 220px">${esc(t.task)}</b>
+        <span class="small muted">${esc(shortDate(t.due_date))}${t.priority === 'High' ? ' · <b style="color:var(--maroon)">High</b>' : ''}</span>
+        <span class="btns" style="display:flex;gap:4px">${actionButtons(t)}</span></div>
+      <div class="small muted" style="margin-top:4px"><a href="#/m/${encodeURIComponent(t.meeting_id)}">${esc(t.meeting_title)}</a> · ${esc(longDate(t.meeting_date))}${t.owner_basis === 'inferred' ? ' · owner inferred' : ''}</div>
+      ${syncLine(t)}</div>`).join('')}` : '';
+  $app.innerHTML = `<p class="eyebrow">${esc(first(INFO.me?.name))}</p><h1>My tasks</h1>
+    <p class="muted small" style="margin:4px 0 0">From meetings. Accept a task to take it on: it goes to your Zoho tasks and your Time Task Plan tab. Mark it done here or in Zoho.</p>
+    ${group('Waiting for you to accept', list.filter(t => t.status === 'pending'))}
+    ${group('Accepted', list.filter(t => t.status === 'approved'))}
+    ${group('Done in the last 2 weeks', list.filter(t => t.status === 'done'))}
+    ${list.length ? '' : '<div class="empty">No meeting tasks for you right now.</div>'}`;
+  wireActionButtons($app, row => encodeURIComponent(row.dataset.mid), viewMine);
+}
+
 /* ---------- home ---------- */
 async function viewHome() {
-  const list = await api('/api/meetings');
+  const [list, mine] = await Promise.all([api('/api/meetings'), api('/api/my-tasks').catch(() => [])]);
+  const waiting = mine.filter(t => t.status === 'pending').length, open = mine.filter(t => t.status === 'approved').length;
   $app.innerHTML = `
     <p class="eyebrow">${esc(INFO.org_name)} meetings</p><h1>Nobody has to take notes.</h1>
     <p class="muted small" style="margin:4px 0 12px">Record → transcribed every minute → Claude writes the minutes → you approve the tasks.</p>
+    ${waiting || open ? `<a class="card" href="#/mine" style="display:block;text-decoration:none;color:inherit;border-left:4px solid var(--gold)">
+      <b>${waiting ? `${waiting} task${waiting === 1 ? '' : 's'} waiting for you to accept` : ''}${waiting && open ? ' · ' : ''}${open ? `${open} open` : ''}</b>
+      <span class="small muted"> → My tasks</span></a>` : ''}
     <a class="btn big" href="#/new" style="margin-bottom:14px">● Start a new meeting</a>
     <div class="card"><h2>Meetings</h2>
       ${list.length ? list.map(m => `<a class="mrow" href="#/m/${encodeURIComponent(m.id)}">
@@ -371,12 +430,10 @@ async function viewMeeting(id) {
   let d; try { d = await api(`/api/meetings/${encodeURIComponent(id)}`); } catch (e) { $app.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   const y = window.scrollY;
   const M = d.minutes, items = d.actions || [], tasks = items.filter(i => i.type === 'task');
-  const pending = items.filter(i => i.status === 'pending').length, approved = items.filter(i => i.status === 'approved').length;
+  const pending = items.filter(i => i.status === 'pending').length, approved = items.filter(i => i.status === 'approved' && !i.zoho_id && i.type !== 'task').length;
   const staff = [...names(), ...(d.participants || []).filter(p => p.guest).map(guestLabel), 'Unassigned'];
   const tabBtn = (k, l, n) => `<button class="tab ${ui.tab === k ? 'on' : ''}" data-tab="${k}">${l}${n ? ` (${n})` : ''}</button>`;
-  const btns = it => it.status === 'pending'
-    ? `<button class="btn sm" data-set="approved">✓ Approve</button><button class="btn plain sm" data-set="skipped">✕</button>`
-    : `<span class="pill ${esc(it.status)}">${esc(it.status)}</span><button class="btn plain sm" data-set="pending">Undo</button>`;
+  const btns = it => actionButtons(it);
   const row = (it, sum, body) => `<details class="ar ${esc(it.status)}" data-key="${esc(it.key)}" ${ui.open.has(it.key) ? 'open' : ''}>
     <summary><span class="k">${esc(it.key)}</span>${sum}<span class="btns">${btns(it)}</span></summary><div class="body">${body}</div></details>`;
   const taskRow = it => row(it, `<span class="t" title="${esc(it.task)}">${esc(it.task)}</span><span class="m"><b>${esc(first(it.owner))}</b>${it.owner_basis === 'inferred' ? ' <span class="pill inferred" title="Worked out from the conversation. Check it.">inferred</span>' : ''} · ${esc(shortDate(it.due_date))}</span>`, `
@@ -384,18 +441,18 @@ async function viewMeeting(id) {
       <div class="row"><div><label>Owner</label><select data-f="owner">${[...new Set([...staff, it.owner])].map(n => `<option ${n === it.owner ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
         <div><label>Due</label><input type="date" data-f="due_date" value="${esc(it.due_date)}"></div>
         <div><label>Priority</label><select data-f="priority">${['High', 'Normal', 'Low'].map(p => `<option ${p === it.priority ? 'selected' : ''}>${p}</option>`).join('')}</select></div></div>
-      ${it.quote ? `<div class="quote"><b>${esc(it.timestamp)}</b> “${esc(it.quote)}”</div>` : ''}`);
+      ${it.quote ? `<div class="quote"><b>${esc(it.timestamp)}</b> “${esc(it.quote)}”</div>` : ''}${syncLine(it)}`);
   const inviteRow = it => row(it, `<span class="t">${esc(it.title)}</span><span class="m"><b>${esc(shortDate(it.date))}</b> ${esc(it.start_time)}</span>`, `
       <label>Title</label><input type="text" data-f="title" value="${esc(it.title)}">
       <div class="row"><div><label>Date</label><input type="date" data-f="date" value="${esc(it.date)}"></div>
         <div><label>Start</label><input type="time" data-f="start_time" value="${esc(it.start_time)}"></div></div>
-      <div class="small muted" style="margin-top:6px">${esc((it.attendees || []).join(', '))} · ${esc(it.purpose)}</div>`);
+      <div class="small muted" style="margin-top:6px">${esc((it.attendees || []).join(', '))} · ${esc(it.purpose)}</div>${syncLine(it)}`);
   const emailRow = it => row(it, `<span class="t">${esc(it.subject)}</span><span class="m">recap email</span>`, `
       <label>Subject</label><input type="text" data-f="subject" value="${esc(it.subject)}"><label>Message</label><textarea data-f="body">${esc(it.body)}</textarea>`);
 
   const actionsTab = !M ? '' : `
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap"><span class="small muted" style="flex:1">${pending ? `${pending} waiting for review. Tap a row to edit.` : 'Everything reviewed.'}</span>
-      ${pending ? '<button class="btn ghost sm" id="all">✓ Approve all</button>' : ''}</div>
+      ${items.some(i => i.status === 'pending' && i.can_decide) ? '<button class="btn ghost sm" id="all">✓ Accept all mine</button>' : ''}</div>
     ${tasks.length ? `<h2>Tasks</h2>${tasks.map(taskRow).join('')}` : '<p class="muted">No tasks came out of this meeting.</p>'}
     ${items.some(i => i.type === 'meeting') ? `<h2 style="margin-top:14px">Follow-up meetings</h2>${items.filter(i => i.type === 'meeting').map(inviteRow).join('')}` : ''}
     ${items.some(i => i.type === 'email') ? `<h2 style="margin-top:14px">Recap email</h2>${items.filter(i => i.type === 'email').map(emailRow).join('')}` : ''}`;
@@ -417,7 +474,7 @@ async function viewMeeting(id) {
     ${d.status !== 'ready' ? `<div class="card" style="margin-top:10px"><span class="pill ${esc(d.status)}">${esc(d.status)}</span>
        ${d.error ? `<p class="err">${esc(d.error)}</p>` : ''}
        ${(d.pieces || []).length ? `<button class="btn" id="retry" style="margin-top:8px">${d.status === 'processing' ? 'Still working… check again' : 'Make the minutes'}</button>` : ''}</div>` : ''}
-    ${approved ? `<div class="card small" style="background:var(--ink);color:#fff;margin-top:10px"><b>${approved} approved</b>, waiting to be created in Zoho.</div>` : ''}
+    ${approved ? `<div class="card small" style="background:var(--ink);color:#fff;margin-top:10px"><b>${approved} approved</b>, waiting to be sent from Outlook (via Claude Code).</div>` : ''}
     <div class="tabs">${M ? tabBtn('actions', 'Actions', pending) + tabBtn('minutes', 'Minutes') : ''}${tabBtn('transcript', 'Transcript')}</div>
     <div>${!M || ui.tab === 'transcript' ? transcriptTab : ui.tab === 'minutes' ? minutesTab : actionsTab}</div>`;
   window.scrollTo(0, y);
@@ -425,13 +482,20 @@ async function viewMeeting(id) {
   const enc = encodeURIComponent(id), again = () => viewMeeting(id);
   $app.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; again(); });
   $app.querySelectorAll('details.ar').forEach(el => el.addEventListener('toggle', () => el.open ? ui.open.add(el.dataset.key) : ui.open.delete(el.dataset.key)));
-  $app.querySelectorAll('[data-set]').forEach(b => b.onclick = async e => { e.preventDefault(); e.stopPropagation();
-    await post(`/api/meetings/${enc}/actions/${encodeURIComponent(b.closest('.ar').dataset.key)}`, {status: b.dataset.set}); again(); });
-  $app.querySelectorAll('.ar [data-f]').forEach(inp => inp.onchange = async () =>
-    post(`/api/meetings/${enc}/actions/${encodeURIComponent(inp.closest('.ar').dataset.key)}`, {[inp.dataset.f]: inp.value}));
+  wireActionButtons($app, () => enc, again);
+  $app.querySelectorAll('.ar [data-f]').forEach(inp => {
+    const it = items.find(i => i.key === inp.closest('.ar').dataset.key);
+    if (it && it.status !== 'pending' && !it.can_decide) inp.disabled = true;
+    inp.onchange = async () => {
+      try { const r = await post(`/api/meetings/${enc}/actions/${encodeURIComponent(inp.closest('.ar').dataset.key)}`, {[inp.dataset.f]: inp.value});
+        if (r.status !== it.status) again(); else if (it.zoho_id || it.sheet_tab) setTimeout(again, 4000); }
+      catch (e) { alert(e.message); again(); } }; });
   const all = document.getElementById('all');
-  if (all) all.onclick = async () => { if (!confirm('Approve every item?')) return;
-    for (const it of items.filter(i => i.status === 'pending')) await post(`/api/meetings/${enc}/actions/${encodeURIComponent(it.key)}`, {status: 'approved'}); again(); };
+  if (all) all.onclick = async () => {
+    const mine = items.filter(i => i.status === 'pending' && i.can_decide && (i.type !== 'task' || names().includes(i.owner)));
+    if (!confirm(`Accept ${mine.length} item${mine.length === 1 ? '' : 's'}? Accepted tasks go to Zoho and the Time Task Plan.`)) return;
+    for (const it of mine) await post(`/api/meetings/${enc}/actions/${encodeURIComponent(it.key)}`, {status: 'approved'}).catch(e => alert(e.message));
+    again(); setTimeout(again, 4000); };
   const chppl = document.getElementById('chppl');
   if (chppl) chppl.onclick = async () => {
     const list = await peopleModal(d.participants || []);

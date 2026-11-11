@@ -4,7 +4,7 @@
 // Auth: the admin key (x-admin-key or "Authorization: Bearer <key>"). Staff sessions can't use it.
 import type { User } from "./auth";
 import {
-	HttpError, approvedActions, deleteMeeting, finish, getHints, getMeeting, listMeetings, putHints,
+	HttpError, approvedActions, runSweep, deleteMeeting, finish, getHints, getMeeting, listMeetings, putHints,
 	setAccess, staffList, updateAction, updateMeeting, db,
 } from "./index";
 
@@ -37,7 +37,7 @@ const TOOLS: Tool[] = [
 	},
 	{
 		name: "list_approved_actions", annotations: { readOnlyHint: true },
-		description: "Everything staff approved that hasn't been done yet, across all meetings: tasks to create in Zoho CRM, follow-up meetings to invite, recap emails to draft. Each item includes the meeting's visibility and viewers (send private-meeting recaps only to viewers).",
+		description: "Approved items that still need Claude Code: mainly recap emails to draft, plus any task or follow-up the automatic Zoho/sheet sync could not handle (sync_error set, or sync switched off). Accepted tasks and follow-ups are otherwise created in Zoho and the Time Task Plan automatically. Each item includes the meeting's visibility and viewers (send private-meeting recaps only to viewers).",
 		inputSchema: { type: "object", properties: {} },
 		run: u => approvedActions(u),
 	},
@@ -107,6 +107,12 @@ const TOOLS: Tool[] = [
 			people: { type: "array", items: { type: "object", required: ["name"], properties: { name: { type: "string" }, note: { type: "string" } } } },
 			employers: { type: "array", items: { type: "string" } } } },
 		run: (u, a) => putHints(u, a),
+	},
+	{
+		name: "sync_now",
+		description: "Run the Zoho / Time Task Plan sync immediately (it also runs every 15 minutes): retries failed or unsynced accepted items and pulls tasks completed in Zoho back into the app and the sheet.",
+		inputSchema: { type: "object", properties: {} },
+		run: async u => { if (!u.admin) throw new HttpError(403, "Admins only"); return runSweep(); },
 	},
 	{
 		name: "app_status", annotations: { readOnlyHint: true },

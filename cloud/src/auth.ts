@@ -97,7 +97,7 @@ export async function callback(req: Request, db: D1Database, org: Org) {
 		return html("<p>Your Zoho email isn't verified yet.</p>", 403);
 	const s = staffByEmail(org, email);
 	if (!s) return html(`<p><b>${email.replace(/[<>&"]/g, "")}</b> isn't on the team list for this app.</p>
-		<p>Ask Pratik to add you, or <a href="/auth/login">sign in with another Zoho account</a>.</p>`, 403);
+		<p>Ask your admin to add you, or <a href="/auth/login">sign in with another Zoho account</a>.</p>`, 403);
 
 	const token = randomToken();
 	await db.prepare("INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)")

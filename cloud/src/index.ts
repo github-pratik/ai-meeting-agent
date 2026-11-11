@@ -4,11 +4,14 @@ import page from "./page.html?raw";
 import { writeMinutes, type Hints, type MinutesT, type Org } from "./minutes";
 import { callback, currentUser, login, logout, staffByEmail, type User } from "./auth";
 import { handleMcp } from "./mcp";
+import { sheetOn, sweep, syncAction, unsyncMeeting, zohoOn } from "./sync";
 
 const WHISPER = "@cf/openai/whisper-large-v3-turbo";
 export const json = (data: unknown, status = 200) => Response.json(data, { status });
 export const err = (msg: string, status = 400) => json({ error: msg }, status);
 export class HttpError extends Error { constructor(public status: number, msg: string) { super(msg); } }
+const background: Promise<unknown>[] = [];
+const later = (p: Promise<unknown>) => { background.push(p.catch(e => console.error("background", e))); };
 
 const SCHEMA = [
 	`CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT, date TEXT, created_at INTEGER,
@@ -19,6 +22,7 @@ const SCHEMA = [
 	   PRIMARY KEY (meeting_id, key))`,
 	`CREATE TABLE IF NOT EXISTS hints (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT, updated_at INTEGER)`,
 	`CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, email TEXT, created_at INTEGER, expires_at INTEGER)`,
+	`CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT, exp INTEGER)`,
 ];
 // Columns added after the first release; existing meetings default to "everyone".
 const MEETING_COLUMNS: Record<string, string> = {
@@ -124,8 +128,9 @@ export async function updateMeeting(u: User, id: string, b: { title?: string; da
 
 export async function deleteMeeting(u: User, id: string) {
 	if (!u.admin) throw new HttpError(403, "Admins only");
-	await loadMeeting(u, id);
+	const m = await loadMeeting(u, id);
 	const d = await db();
+	if (zohoOn() || sheetOn()) await unsyncMeeting(d, org(), m);
 	await d.batch(["actions", "pieces"].map(t => d.prepare(`DELETE FROM ${t} WHERE meeting_id = ?`).bind(id))
 		.concat(d.prepare("DELETE FROM meetings WHERE id = ?").bind(id)));
 	return { deleted: id };
@@ -201,11 +206,21 @@ export async function finish(u: User, id: string) {
 	}
 	await d.prepare("UPDATE meetings SET status='processing', error=NULL WHERE id=?").bind(id).run();
 	try {
-		const { minutes, cost } = await writeMinutes(env.ANTHROPIC_API_KEY, org(), m.title, m.date, pieces, await getHints(), participantsOf(m));
+		const kept = (await d.prepare("SELECT key, type, data FROM actions WHERE meeting_id=? AND status NOT IN ('pending','skipped')")
+			.bind(id).all<{ key: string; type: string; data: string }>()).results;
+		const keptTitles = kept.filter(k => k.type === "task").map(k => { const x = JSON.parse(k.data); return `${x.task} (${x.owner})`; });
+		const { minutes, cost } = await writeMinutes(env.ANTHROPIC_API_KEY, org(), m.title, m.date, pieces, await getHints(), participantsOf(m), keptTitles);
+		const used = new Set(kept.map(k => k.key));
+		const fresh = buildActions(minutes).map(a => {
+			if (!used.has(a.key) || a.key === "EMAIL") { used.add(a.key); return a; }
+			const prefix = a.key.replace(/\d+$/, ""); let n = 1;
+			while (used.has(`${prefix}${n}`)) n++;
+			used.add(`${prefix}${n}`); return { ...a, key: `${prefix}${n}` };
+		});
 		await d.batch([
 			d.prepare("UPDATE meetings SET status='ready', minutes=?, cost=? WHERE id=?").bind(JSON.stringify(minutes), cost, id),
-			d.prepare("DELETE FROM actions WHERE meeting_id=? AND status IN ('pending','approved','skipped')").bind(id),
-			...buildActions(minutes).map(a => d.prepare(
+			d.prepare("DELETE FROM actions WHERE meeting_id=? AND status IN ('pending','skipped')").bind(id),
+			...fresh.map(a => d.prepare(
 				"INSERT OR IGNORE INTO actions (meeting_id, key, type, status, data) VALUES (?, ?, ?, 'pending', ?)")
 				.bind(id, a.key, a.type, JSON.stringify(a.data))),
 		]);
@@ -259,42 +274,96 @@ export async function getMeeting(u: User, id: string) {
 	const d = await db();
 	const pieces = (await d.prepare("SELECT idx, start_s, end_s, text FROM pieces WHERE meeting_id=? ORDER BY idx").bind(id).all()).results;
 	const actions = (await d.prepare("SELECT key, type, status, data FROM actions WHERE meeting_id=? ORDER BY rowid").bind(id).all<{ key: string; type: string; status: string; data: string }>())
-		.results.map(a => ({ key: a.key, type: a.type, status: a.status, ...JSON.parse(a.data) }));
+		.results.map(a => { const x = JSON.parse(a.data); return { key: a.key, type: a.type, status: a.status, ...x, can_decide: canDecide(u, m, a.type, x) }; });
 	const { viewers: _v, created_by: _c, participants: _p, ...rest } = m;
 	return { ...rest, participants: participantsOf(m), minutes: m.minutes ? JSON.parse(m.minutes) : null, pieces, actions,
 		access: accessInfo(org(), m), can_manage: canManage(u, m) };
 }
 
-// Staff can review (pending / approved / skipped). Only the admin side (MCP, scripts) marks items done after
-// creating them in Zoho or Outlook, and may attach the resulting ids.
-const STAFF_STATUSES = ["pending", "approved", "skipped"], DONE_STATUSES = ["created", "draft", "sent"];
+// Who may accept, skip or (once accepted) edit an item:
+//   task → its owner, or anyone with full access;  follow-up meeting → a staff attendee, the meeting's creator or full access;
+//   recap email → the meeting's creator or full access.  While an item is pending, anyone who can see it may fix its fields.
+// "done" is set by the owner in the app or pulled from Zoho. created / draft / sent are set by Claude Code (admin key).
+const STAFF_STATUSES = ["pending", "approved", "skipped", "done"], DONE_STATUSES = ["created", "draft", "sent"];
 const EDITABLE = ["task", "owner", "due_date", "priority", "title", "date", "start_time", "subject", "body", "to"];
 const ADMIN_FIELDS = ["zoho_id", "outlook_url", "event_id", "done_at", "note"];
+const staffByName = (o: Org, name: string) => o.staff.find(s => s.name === name);
+const leaders = () => org().staff.filter(s => s.access === "all").map(s => s.name.split(" ")[0]).join(", ") || "a manager";
+
+export function canDecide(u: User, m: MeetingRow, type: string, data: Record<string, any>) {
+	if (u.all) return true;
+	const o = org();
+	if (type === "task") return staffByName(o, data.owner)?.email === u.email;
+	if (type === "meeting") return m.created_by === u.email || (data.attendees || []).some((a: string) =>
+		a === u.name || a.split(" ")[0] === u.name.split(" ")[0]);
+	return m.created_by === u.email;
+}
+function waitingFor(type: string, data: Record<string, any>) {
+	if (type === "task") return data.owner && data.owner !== "Unassigned" ? data.owner : "an owner to be picked";
+	return type === "meeting" ? "an attendee" : "the person who recorded it";
+}
 
 export async function updateAction(u: User, id: string, key: string, b: Record<string, unknown>) {
-	await loadMeeting(u, id);
+	const m = await loadMeeting(u, id);
 	const d = await db();
-	const row = await d.prepare("SELECT status, data FROM actions WHERE meeting_id=? AND key=?").bind(id, key).first<{ status: string; data: string }>();
+	const row = await d.prepare("SELECT type, status, data FROM actions WHERE meeting_id=? AND key=?").bind(id, key).first<{ type: string; status: string; data: string }>();
 	if (!row) throw new HttpError(404, "Action not found");
 	if (DONE_STATUSES.includes(row.status) && !u.admin) throw new HttpError(409, "Already done");
-	const data = JSON.parse(row.data);
+	const data = JSON.parse(row.data), o = org();
+	const before = JSON.stringify(data);
+	const mayDecide = canDecide(u, m, row.type, data);
+	const editing = EDITABLE.some(f => b[f] !== undefined);
+	if (editing && row.status !== "pending" && !mayDecide)
+		throw new HttpError(403, `Only ${waitingFor(row.type, data)} (or ${leaders()}) can change this once it's accepted`);
 	for (const f of EDITABLE) {
 		if (typeof b[f] === "string") data[f] = (b[f] as string).slice(0, 5000);
 		else if (f === "to" && Array.isArray(b[f])) data[f] = (b[f] as unknown[]).map(String).slice(0, 50);
 	}
 	if (u.admin) for (const f of ADMIN_FIELDS) if (typeof b[f] === "string") data[f] = (b[f] as string).slice(0, 2000);
+	let status = row.status;
+	const asked = b.status as string | undefined;
 	const allowed = u.admin ? [...STAFF_STATUSES, ...DONE_STATUSES] : STAFF_STATUSES;
-	const status = allowed.includes(b.status as string) ? b.status as string : row.status;
+	if (asked && allowed.includes(asked) && asked !== row.status) {
+		if (row.type === "task" && !staffByName(o, data.owner)?.email && ["approved", "done"].includes(asked))
+			throw new HttpError(400, "Pick a staff owner first. Tasks for guests: assign the staff member who follows up.");
+		if (!canDecide(u, m, row.type, data)) throw new HttpError(403, `Waiting for ${waitingFor(row.type, data)} to accept this (or ${leaders()})`);
+		if (row.type === "task" && ["approved", "done"].includes(asked) && !staffByName(o, data.owner)?.email)
+			throw new HttpError(400, "Pick a staff owner first. Tasks for guests: assign the staff member who follows up.");
+		status = asked;
+	}
+	// Handing an accepted task to someone else sends it back: the new owner has to accept it.
+	const ownerChanged = typeof b.owner === "string" && JSON.parse(before).owner !== data.owner;
+	if (ownerChanged && ["approved", "done"].includes(status) && !(asked === "approved" && canDecide(u, m, row.type, data))) status = "pending";
+	if (status === "approved" && row.status !== "approved") { data.accepted_by = u.name; data.accepted_at = new Date().toISOString(); }
+	if (status === "done" && !data.done_at) { data.done_at = new Date().toISOString(); data.done_in = "app"; }
+	if (status !== "done" && row.status === "done") { data.done_at = ""; data.done_in = ""; }
 	if (DONE_STATUSES.includes(status) && !data.done_at) data.done_at = new Date().toISOString();
+	const changed = status !== row.status || JSON.stringify(data) !== before;
+	if (changed) data.rev = Number(data.rev || 0) + 1;   // the sync compares this with the last version it pushed
 	await d.prepare("UPDATE actions SET status=?, data=? WHERE meeting_id=? AND key=?").bind(status, JSON.stringify(data), id, key).run();
-	return { key, status, ...data };
+	if (changed && ["task", "meeting"].includes(row.type) && (zohoOn() || sheetOn()))
+		later(syncAction(d, o, m, { meeting_id: id, key, type: row.type, status, data: JSON.stringify(data) }, { approverEmail: u.email }));
+	delete data.sync_lock;
+	return { key, status, ...data, can_decide: canDecide(u, m, row.type, data) };
+}
+
+// Tasks owned by the caller across every meeting they can see: their to-do list.
+export async function myTasks(u: User) {
+	const rows = (await (await db()).prepare(`SELECT m.*, a.meeting_id, a.key, a.type, a.status, a.data
+		FROM actions a JOIN meetings m ON m.id = a.meeting_id WHERE a.type = 'task' AND a.status IN ('pending','approved','done')
+		AND json_extract(a.data,'$.owner') = ? ORDER BY m.created_at DESC, a.rowid`).bind(u.name)
+		.all<{ meeting_id: string; key: string; type: string; status: string; data: string } & MeetingRow>()).results;
+	return rows.filter(r => canSee(u, r) && (r.status !== "done" || Date.now() - Date.parse(JSON.parse(r.data).done_at || 0) < 14 * 864e5))
+		.map(r => ({ meeting_id: r.meeting_id, meeting_title: r.title, meeting_date: r.date, key: r.key, status: r.status, ...JSON.parse(r.data), can_decide: true }));
 }
 
 // Approved items across every meeting the caller can see, oldest first: the to-do list for Claude Code.
 export async function approvedActions(u: User) {
 	const d = await db();
 	const rows = (await d.prepare(`SELECT a.meeting_id, a.key, a.type, a.status, a.data, m.title, m.date, m.visibility, m.viewers, m.created_by
-		FROM actions a JOIN meetings m ON m.id = a.meeting_id WHERE a.status = 'approved' ORDER BY m.created_at, a.rowid`)
+		FROM actions a JOIN meetings m ON m.id = a.meeting_id WHERE a.status = 'approved'
+		AND NOT (a.type IN ('task','meeting') AND COALESCE(json_extract(a.data,'$.zoho_id'),'') <> '')
+		ORDER BY m.created_at, a.rowid`)
 		.all<{ meeting_id: string; key: string; type: string; status: string; data: string } & MeetingRow>()).results;
 	const o = org();
 	return rows.filter(r => canSee(u, r)).map(r => ({
@@ -312,7 +381,8 @@ async function api(req: Request, u: User, p: string) {
 	const body = async () => req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
 	let m: RegExpMatchArray | null;
 	if (p === "/api/check" || p === "/api/me")
-		return json({ ok: true, org_name: org().org_name, staff: staffList(), me: { name: u.name, email: u.email, sees_all: u.all, admin: u.admin } });
+		return json({ ok: true, org_name: org().org_name, staff: staffList(), me: { name: u.name, email: u.email, sees_all: u.all, admin: u.admin },
+			sync: { zoho: zohoOn(), sheet: sheetOn() } });
 	if (p === "/api/hints" && req.method === "PUT") return json(await putHints(u, await body() as Partial<Hints>));
 	if (p === "/api/hints" && req.method === "GET") {
 		const h = await getHints();
@@ -321,6 +391,7 @@ async function api(req: Request, u: User, p: string) {
 	if (p === "/api/meetings" && req.method === "GET") return json(await listMeetings(u));
 	if (p === "/api/meetings" && req.method === "POST") return json(await createMeeting(u, await body()));
 	if (p === "/api/actions/approved" && req.method === "GET") return json(await approvedActions(u));
+	if (p === "/api/my-tasks" && req.method === "GET") return json(await myTasks(u));
 	if ((m = p.match(/^\/api\/meetings\/([\w-]+)$/))) {
 		if (req.method === "GET") return json(await getMeeting(u, m[1]));
 		if (req.method === "PATCH") return json(await updateMeeting(u, m[1], await body()));
@@ -333,8 +404,20 @@ async function api(req: Request, u: User, p: string) {
 	return err("Unknown route", 404);
 }
 
+export async function runSweep() { return sweep(await db(), org()); }
+
 export default {
-	async fetch(req: Request) {
+	async scheduled(_c: ScheduledController, _e: unknown, ctx: ExecutionContext) { ctx.waitUntil(runSweep()); },
+	async fetch(req: Request, _e: unknown, ctx: ExecutionContext) {
+		background.length = 0;
+		const res = await handle(req);
+		if (background.length) ctx.waitUntil(Promise.allSettled(background.splice(0)));
+		return res;
+	},
+} satisfies ExportedHandler;
+
+async function handle(req: Request) {
+	{
 		const url = new URL(req.url);
 		const p = url.pathname;
 		try {
@@ -352,5 +435,5 @@ export default {
 			if (e instanceof HttpError) return err(e.message, e.status);
 			return err(e instanceof Error ? e.message : String(e), 500);
 		}
-	},
-} satisfies ExportedHandler;
+	}
+}

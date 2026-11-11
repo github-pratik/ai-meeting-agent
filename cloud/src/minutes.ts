@@ -36,7 +36,7 @@ export type Org = {
 	org_name: string;
 	org_description: string;
 	// email = the Zoho account they sign in with; access "all" = sees every meeting, including private ones
-	staff: { name: string; role: string; aliases?: string[]; email?: string; access?: "all" }[];
+	staff: { name: string; role: string; aliases?: string[]; email?: string; access?: "all"; sheet_tab?: string }[];
 	vocabulary: string[];
 };
 
@@ -77,7 +77,7 @@ const ts = (s: number) => new Date(Math.max(0, s) * 1000).toISOString().substrin
 
 export async function writeMinutes(apiKey: string, org: Org, title: string, date: string,
 	pieces: { start_s: number; text: string }[], hints?: Hints | null,
-	attendees: { name: string; role?: string; org?: string; guest: boolean }[] = []) {
+	attendees: { name: string; role?: string; org?: string; guest: boolean }[] = [], alreadyAccepted: string[] = []) {
 	const day = new Date(`${date}T12:00:00Z`);
 	const weekday = day.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
 	const transcript = pieces.map(p => `[${ts(p.start_s)}] ${p.text}`).join("\n");
@@ -85,6 +85,7 @@ export async function writeMinutes(apiKey: string, org: Org, title: string, date
 Meeting date: ${date} (${weekday})
 Staff list: ${org.staff.map(s => `${s.name} (${s.role}; also called ${(s.aliases || []).join(", ") || "-"})`).join("; ")}
 Vocabulary: ${org.vocabulary.join(", ")}` +
+		(alreadyAccepted.length ? `\nAlready accepted earlier (do not list these again as action items): ${alreadyAccepted.join("; ")}` : "") +
 		(attendees.length ? `\nAttendees (${attendees.length}): ${attendees.map(a => a.guest ? `${a.name} (guest${a.org ? `, ${a.org}` : ""})` : `${a.name} (staff, ${a.role || ""})`).join("; ")}` : "\nAttendees: not given") +
 		(hints?.people?.length ? `\nKnown people (CRM spelling; note = lead or batch): ${hints.people.map(p => p.note ? `${p.name} [${p.note}]` : p.name).join("; ")}` : "") +
 		(hints?.employers?.length ? `\nKnown employers: ${hints.employers.join("; ")}` : "");
