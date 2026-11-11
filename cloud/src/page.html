@@ -125,40 +125,43 @@ function route() {
   viewHome();
 }
 
-/* ---------- who can see: popup used when starting a meeting and to change it later ---------- */
+/* ---------- who can see: shown on the New meeting page, and in a popup to change it later ---------- */
 const accessLabel = a => !a || a.visibility !== 'private' ? 'Everyone on staff'
   : `Private · ${a.viewers.map(v => first(v.name)).join(', ') || 'only you'}`;
-function accessModal({title, visibility = 'everyone', viewers = [], creator, start}) {
+function accessFields({visibility = 'everyone', viewers = [], owner}) {
+  const me = INFO.me?.email; owner = owner || me;
+  const always = INFO.staff.filter(p => p.sees_all).map(p => first(p.name));
+  return `<label style="margin-top:12px">Who can see the notes?</label>
+    <label class="choice"><input type="radio" name="vis" value="everyone" ${visibility !== 'private' ? 'checked' : ''}>
+      <span><b>Everyone on staff</b><span class="small muted">Staff meetings. All staff can read the minutes and transcript.</span></span></label>
+    <label class="choice"><input type="radio" name="vis" value="private" ${visibility === 'private' ? 'checked' : ''}>
+      <span><b>Private: only people I pick</b><span class="small muted">For 1:1s and small meetings.</span></span></label>
+    <div class="pick" ${visibility === 'private' ? '' : 'hidden'}>
+      <div class="people">${INFO.staff.map(p => `<label><input type="checkbox" value="${esc(p.email)}"
+        ${p.email === owner || viewers.includes(p.email) ? 'checked' : ''} ${p.email === owner ? 'disabled' : ''}>${esc(p.name)}${p.email === me ? ' (you)' : ''}</label>`).join('')}</div>
+      <p class="small muted" style="margin:8px 0 0">${esc(always.join(', '))} can always see every meeting.</p>
+    </div>`;
+}
+function wireAccess(root) {
+  root.querySelectorAll('input[name=vis]').forEach(r => r.onchange = () => {
+    root.querySelector('.pick').hidden = root.querySelector('input[name=vis]:checked').value !== 'private'; });
+}
+function readAccess(root) {
+  const vis = root.querySelector('input[name=vis]:checked').value;
+  return {visibility: vis, viewers: vis === 'private' ? [...root.querySelectorAll('.people input:checked')].map(i => i.value) : []};
+}
+function accessModal({visibility, viewers, creator}) {
   return new Promise(resolve => {
-    const me = INFO.me?.email, owner = creator || me;
-    const always = INFO.staff.filter(p => p.sees_all).map(p => first(p.name));
     const bg = document.createElement('div'); bg.className = 'modal-bg';
-    bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mt">
-      <h2 id="mt">${start ? 'Before you start' : 'Who can see this meeting'}</h2>
-      ${start ? `<label for="mtitle">Meeting name</label><input id="mtitle" type="text" value="${esc(title)}">` : ''}
-      <label style="margin-top:12px">Who can see the notes?</label>
-      <label class="choice"><input type="radio" name="vis" value="everyone" ${visibility !== 'private' ? 'checked' : ''}>
-        <span><b>Everyone on staff</b><span class="small muted">Staff meetings. All staff can read the minutes and transcript.</span></span></label>
-      <label class="choice"><input type="radio" name="vis" value="private" ${visibility === 'private' ? 'checked' : ''}>
-        <span><b>Private: only people I pick</b><span class="small muted">For 1:1s and small meetings.</span></span></label>
-      <div id="pick" ${visibility === 'private' ? '' : 'hidden'}>
-        <div class="people">${INFO.staff.map(p => `<label><input type="checkbox" value="${esc(p.email)}"
-          ${p.email === owner || viewers.includes(p.email) ? 'checked' : ''} ${p.email === owner ? 'disabled' : ''}>${esc(p.name)}${p.email === me ? ' (you)' : ''}</label>`).join('')}</div>
-        <p class="small muted" style="margin:8px 0 0">${esc(always.join(', '))} can always see every meeting.</p>
-      </div>
+    bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="mt"><h2 id="mt">Who can see this meeting</h2>
+      ${accessFields({visibility, viewers, owner: creator})}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-        <button class="btn plain" id="mcancel">Cancel</button>
-        <button class="btn" id="mok">${start ? '● Start recording' : 'Save'}</button></div></div>`;
-    document.body.appendChild(bg);
+        <button class="btn plain" id="mcancel">Cancel</button><button class="btn" id="mok">Save</button></div></div>`;
+    document.body.appendChild(bg); wireAccess(bg);
     const close = v => { bg.remove(); resolve(v); };
-    bg.querySelectorAll('input[name=vis]').forEach(r => r.onchange = () => bg.querySelector('#pick').hidden = r.value !== 'private' || !r.checked);
     bg.querySelector('#mcancel').onclick = () => close(null);
     bg.onclick = e => { if (e.target === bg) close(null); }; // must not return false: that cancels clicks inside the popup
-    bg.querySelector('#mok').onclick = () => {
-      const vis = bg.querySelector('input[name=vis]:checked').value;
-      const picked = [...bg.querySelectorAll('.people input:checked')].map(i => i.value);
-      close({title: bg.querySelector('#mtitle')?.value, visibility: vis, viewers: vis === 'private' ? picked : []});
-    };
+    bg.querySelector('#mok').onclick = () => close(readAccess(bg));
   });
 }
 
@@ -211,6 +214,7 @@ function viewNew() {
         <div><label for="title">Meeting name</label><input id="title" type="text" value="Staff meeting"></div>
         <div><label for="date">Date</label><input id="date" type="date" value="${today}"></div>
       </div>
+      <div id="access">${accessFields({})}</div>
       <div class="recbox">
         <div id="state" class="muted small">Put this phone or laptop in the middle of the table. Tell everyone it's being recorded.</div>
         <div class="timer" id="timer">00:00:00</div>
@@ -224,6 +228,7 @@ function viewNew() {
       <div class="err" id="err"></div>
     </div>`;
   const $ = id => document.getElementById(id);
+  wireAccess($('access'));
   let id = null, ctx, stream, proc, src, wake, t0, tick, floats = [], nSamples = 0, pieceStart = 0, idx = 0;
   const queue = [], done = []; let sending = false, prevText = '', stopped = false;
 
@@ -263,9 +268,7 @@ function viewNew() {
   $('rec').onclick = async () => {
     if (recording) return stop();
     if (starting) return;                       // ignore double taps while setting up
-    const pick = await accessModal({title: $('title').value, start: true});
-    if (!pick) return;
-    if (pick.title) $('title').value = pick.title;
+    const pick = readAccess($('access'));
     starting = true; $('rec').disabled = true; $('err').textContent = ''; $('state').textContent = 'Starting…';
     try {
       // Record at the phone's own sample rate: forcing 16 kHz distorts the microphone in iPhone Safari.
@@ -275,6 +278,7 @@ function viewNew() {
       await ctx.resume();
       const made = await post('/api/meetings', {title: $('title').value, date: $('date').value, visibility: pick.visibility, viewers: pick.viewers});
       id = made.id;
+      $('access').hidden = true; $('title').disabled = $('date').disabled = true; // fixed once recording starts; change later from the meeting page
       $('who').innerHTML = made.visibility === 'private' ? `🔒 Private · ${esc(made.viewers.map(e => first(nameOf(e))).join(', '))}` : 'Visible to everyone on staff';
       src = ctx.createMediaStreamSource(stream);
       proc = ctx.createScriptProcessor(4096, 1, 1);
