@@ -2,7 +2,7 @@
 import { env } from "cloudflare:workers";
 import page from "./page.html?raw";
 import { writeMinutes, type Hints, type MinutesT, type Org } from "./minutes";
-import { callback, currentUser, login, logout, staffByEmail, type User } from "./auth";
+import { callback, currentUser, desktopHandoff, desktopLogout, login, logout, staffByEmail, type User } from "./auth";
 import { handleMcp } from "./mcp";
 import { sheetOn, sweep, syncAction, unsyncMeeting, zohoOn } from "./sync";
 
@@ -426,6 +426,8 @@ async function handle(req: Request) {
 			if (p === "/auth/login") return login(req);
 			if (p === "/auth/callback") return callback(req, await db(), org());
 			if (p === "/auth/logout") return logout(req, await db());
+			if (p === "/auth/desktop") return desktopHandoff(req, await db(), org());
+			if (p === "/api/desktop/logout" && req.method === "POST") return desktopLogout(req, await db());
 			if (p !== "/mcp" && !p.startsWith("/api/")) return new Response("Not found", { status: 404 });
 			const u = await currentUser(req, await db(), org());
 			if (p === "/mcp") return handleMcp(req, u);

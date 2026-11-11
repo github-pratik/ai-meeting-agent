@@ -317,6 +317,10 @@ function viewNew() {
       </div>
       <div id="people">${peopleFields({defaultMe: true})}</div>
       <div id="access">${accessFields({})}</div>
+      ${navigator.mediaDevices?.getDisplayMedia ? `<label class="choice" id="onlineWrap" style="margin-top:12px"><input type="checkbox" id="online">
+        <span><b>Online call (Teams, Zoom, Google Meet)</b><span class="small muted">Also records the other people on the call, even with headphones.
+        Chrome asks what to share: for a call in the browser pick its <b>tab</b> and tick <b>Share tab audio</b>; for the Teams or Zoom app pick
+        <b>Entire screen</b> and tick <b>Share system audio</b>. Only the sound is recorded, never the screen.</span></span></label>` : ''}
       <div class="recbox">
         <div id="state" class="muted small">Put this phone or laptop in the middle of the table. Tell everyone it's being recorded.</div>
         <div class="timer" id="timer">00:00:00</div>
@@ -335,7 +339,7 @@ function viewNew() {
   $('access').querySelector('input[value=private]').addEventListener('change', () => {
     const att = new Set([...$('people').querySelectorAll('.att:checked')].map(i => i.value));
     $('access').querySelectorAll('.people input:not(:disabled)').forEach(i => i.checked = att.has(i.value)); });
-  let id = null, ctx, stream, proc, src, wake, t0, tick, floats = [], nSamples = 0, pieceStart = 0, idx = 0;
+  let id = null, ctx, stream, proc, src, display = null, dsrc = null, wake, t0, tick, floats = [], nSamples = 0, pieceStart = 0, idx = 0;
   const queue = [], done = []; let sending = false, prevText = '', stopped = false;
 
   const status = () => { $('pieces').textContent = idx ? `${done.length} of ${idx} minute${idx === 1 ? '' : 's'} transcribed` : ''; };
@@ -379,8 +383,22 @@ function viewNew() {
     try {
       // Record at the phone's own sample rate: forcing 16 kHz distorts the microphone in iPhone Safari.
       // The page converts to 16 kHz itself (toInt16) before sending.
+      const online = !!$('online')?.checked;
+      if (online) {
+        // Ask for the call's audio first, while the click still counts as a user gesture.
+        try {
+          display = await navigator.mediaDevices.getDisplayMedia({video: true, audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false},
+            systemAudio: 'include', selfBrowserSurface: 'exclude', surfaceSwitching: 'include'});
+        } catch { throw new Error('Call audio was not shared'); }
+        if (!display.getAudioTracks().length) {
+          display.getTracks().forEach(t => t.stop()); display = null;
+          throw new Error('No call audio was shared. Start again and tick "Share tab audio" or "Share system audio" in Chrome\'s window');
+        }
+        display.getVideoTracks().forEach(t => t.enabled = false);   // the picture is never used
+      }
       ctx = new (window.AudioContext || window.webkitAudioContext)();
-      stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: true, autoGainControl: true}});
+      // Online calls: let the browser cancel the call's sound leaking from speakers into the mic, so it isn't recorded twice.
+      stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: online, noiseSuppression: true, autoGainControl: true}});
       await ctx.resume();
       const made = await post('/api/meetings', {title: $('title').value, date: $('date').value, visibility: pick.visibility, viewers: pick.viewers, participants: people});
       id = made.id;
@@ -395,7 +413,14 @@ function viewNew() {
           $('lvl').style.width = `${Math.min(100, Math.round(Math.sqrt(s / (d.length / 4)) * 400))}%`; }
         if (nSamples >= ctx.sampleRate * PIECE_SECONDS) cut(false);
       };
-      src.connect(proc); proc.connect(ctx.destination);
+      const mix = ctx.createGain();
+      src.connect(mix);
+      if (display) {
+        dsrc = ctx.createMediaStreamSource(new MediaStream(display.getAudioTracks())); dsrc.connect(mix);
+        display.getAudioTracks()[0].onended = () => { $('err').textContent = 'Call audio sharing stopped. Still recording your microphone.'; };
+        $('who').insertAdjacentHTML('beforebegin', '<div class="who">Recording the call audio + your microphone</div>');
+      }
+      mix.connect(proc); proc.connect(ctx.destination);
       try { wake = await navigator.wakeLock?.request('screen'); } catch {}
       t0 = Date.now(); tick = setInterval(() => $('timer').textContent = fmt((Date.now() - t0) / 1000), 500);
       recording = true;
@@ -403,17 +428,19 @@ function viewNew() {
       $('rec').textContent = '■ Stop & make minutes';
       $('lvlWrap').hidden = false;
     } catch (e) {
-      try { stream && stream.getTracks().forEach(t => t.stop()); ctx && ctx.close(); } catch {}
+      try { stream && stream.getTracks().forEach(t => t.stop()); display && display.getTracks().forEach(t => t.stop()); ctx && ctx.close(); } catch {}
+      display = null;
       ctx = null; $('state').textContent = 'Not recording.';
-      $('err').textContent = e.message === 'Please sign in' ? '' : `Could not start (${e.message}). Allow the microphone and try again.`;
+      $('err').textContent = e.message === 'Please sign in' ? '' : /call audio/i.test(e.message) ? e.message : `Could not start (${e.message}). Allow the microphone and try again.`;
     } finally { starting = false; $('rec').disabled = false; }
   };
 
   async function stop() {
     if (stopped) return; stopped = true;
     $('rec').disabled = true; clearInterval(tick);
-    try { proc.disconnect(); src.disconnect(); } catch {}
+    try { proc.disconnect(); src.disconnect(); dsrc && dsrc.disconnect(); } catch {}
     stream.getTracks().forEach(t => t.stop());
+    display && display.getTracks().forEach(t => t.stop());
     cut(true); try { wake && wake.release(); } catch {}
     $('state').textContent = 'Sending the last minute…';
     while (queue.length || sending) { await pump(); await new Promise(r => setTimeout(r, 500)); if (queue.length && !sending) await new Promise(r => setTimeout(r, 3000)); }

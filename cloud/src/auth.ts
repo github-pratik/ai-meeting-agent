@@ -37,7 +37,9 @@ export async function currentUser(req: Request, db: D1Database, org: Org): Promi
 	const key = req.headers.get("x-admin-key") || (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
 	if (key && env.ADMIN_API_KEY && timingSafeEqual(key, env.ADMIN_API_KEY))
 		return { email: "admin-api", name: "Admin (API)", all: true, admin: true };
-	const token = cookie(req, "ma_session");
+	// Browser: session cookie. Desktop app: the same kind of session token, sent as a bearer token.
+	const bearer = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1] || "";
+	const token = cookie(req, "ma_session") || bearer;
 	if (!token) return null;
 	const row = await db.prepare("SELECT email FROM sessions WHERE token_hash = ? AND expires_at > ?")
 		.bind(await sha256(token), Date.now()).first<{ email: string }>();
@@ -64,6 +66,8 @@ export function login(req: Request) {
 		}).toString();
 		const h = new Headers({ location: auth.toString() });
 		h.append("set-cookie", setCookie("ma_state", `${state}.${verifier}`, 600));
+		const next = url.searchParams.get("next") || "";
+		if (/^\/auth\/desktop\?nonce=[\w-]{16,64}$/.test(next)) h.append("set-cookie", setCookie("ma_next", next, 600));
 		return new Response(null, { status: 302, headers: h });
 	});
 }
@@ -103,7 +107,9 @@ export async function callback(req: Request, db: D1Database, org: Org) {
 	await db.prepare("INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)")
 		.bind(await sha256(token), email, Date.now(), Date.now() + SESSION_DAYS * 864e5).run();
 	await db.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(Date.now()).run();
-	const h = new Headers({ location: "/#/" });
+	const next = cookie(req, "ma_next");
+	const h = new Headers({ location: /^\/auth\/desktop\?nonce=[\w-]{16,64}$/.test(next) ? next : "/#/" });
+	h.append("set-cookie", setCookie("ma_next", "", 0));
 	h.append("set-cookie", setCookie("ma_session", token, SESSION_DAYS * 86400));
 	h.append("set-cookie", setCookie("ma_state", "", 0));
 	return new Response(null, { status: 302, headers: h });
@@ -113,4 +119,32 @@ export async function logout(req: Request, db: D1Database) {
 	const token = cookie(req, "ma_session");
 	if (token) await db.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(token)).run();
 	return new Response(null, { status: 302, headers: { location: "/", "set-cookie": setCookie("ma_session", "", 0) } });
+}
+
+// Desktop app sign-in. The app opens /auth/desktop?nonce=<random> in the browser; once the person is signed in there,
+// we mint a separate long-lived session for the app and hand it back through the meetingagent:// link with the same
+// nonce, which the app checks. Removing someone from the staff list still cuts the app off.
+const DESKTOP_DAYS = 180;
+export async function desktopHandoff(req: Request, db: D1Database, org: Org) {
+	const url = new URL(req.url);
+	const nonce = url.searchParams.get("nonce") || "";
+	if (!/^[\w-]{16,64}$/.test(nonce)) return html("<p>Open this from the Meeting Agent desktop app.</p>", 400);
+	const u = await currentUser(req, db, org);
+	if (!u || u.email === "admin-api") {
+		return new Response(null, { status: 302, headers: { location: `/auth/login?next=${encodeURIComponent(`/auth/desktop?nonce=${nonce}`)}` } });
+	}
+	const token = randomToken();
+	await db.prepare("INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, ?, ?)")
+		.bind(await sha256(token), u.email, Date.now(), Date.now() + DESKTOP_DAYS * 864e5).run();
+	const link = `meetingagent://signed-in?token=${encodeURIComponent(token)}&nonce=${encodeURIComponent(nonce)}`;
+	return html(`<h2 style="margin:0 0 8px">Signed in as ${u.name.replace(/[<>&"]/g, "")}</h2>
+		<p>Click the button to finish signing in the desktop app, then close this tab.</p>
+		<p><a href="${link}" style="display:inline-block;background:#92302C;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:700">Open Meeting Agent</a></p>
+		<script>location.href = ${JSON.stringify(link)};</script>`, 200, { "cache-control": "no-store", "referrer-policy": "no-referrer" });
+}
+
+export async function desktopLogout(req: Request, db: D1Database) {
+	const bearer = (req.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1] || "";
+	if (bearer) await db.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await sha256(bearer)).run();
+	return Response.json({ ok: true });
 }

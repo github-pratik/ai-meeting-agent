@@ -22,3 +22,6 @@ __pycache__/
 cloud/node_modules/
 cloud/.cloudflare/
 .wrangler/
+
+# experimental desktop helper (parked; see issues)
+desktop/
