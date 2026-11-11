@@ -137,6 +137,11 @@ cf deploy --secrets-file .env.secrets.json
 
 Staff then open `https://<your-worker>/#code=<team-code>` once; the code is remembered on that device.
 
+**Name hints (optional).** Push the CRM's current leads, students and employers so the minutes spell them
+exactly as the CRM does and don't merge first names said in a row into one person:
+`PUT /api/hints` with `{ "people": [{ "name": "...", "note": "lead" | "<batch code>" }], "employers": ["..."] }`
+(team-code header). The list lives only in the database, never in the repo.
+
 ### Local, on-premises (Apple Silicon Mac)
 
 The first version runs everything except the minutes on a local Mac, including speaker separation:

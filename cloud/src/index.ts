@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { env } from "cloudflare:workers";
 import page from "./page.html?raw";
-import { writeMinutes, type MinutesT, type Org } from "./minutes";
+import { writeMinutes, type Hints, type MinutesT, type Org } from "./minutes";
 
 const WHISPER = "@cf/openai/whisper-large-v3-turbo";
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -14,6 +14,7 @@ const SCHEMA = [
 	   PRIMARY KEY (meeting_id, idx))`,
 	`CREATE TABLE IF NOT EXISTS actions (meeting_id TEXT, key TEXT, type TEXT, status TEXT, data TEXT,
 	   PRIMARY KEY (meeting_id, key))`,
+	`CREATE TABLE IF NOT EXISTS hints (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT, updated_at INTEGER)`,
 ];
 let schemaReady = false;
 async function db() {
@@ -116,7 +117,7 @@ async function finish(id: string) {
 	}
 	await d.prepare("UPDATE meetings SET status='processing', error=NULL WHERE id=?").bind(id).run();
 	try {
-		const { minutes, cost } = await writeMinutes(env.ANTHROPIC_API_KEY, org(), m.title, m.date, pieces);
+		const { minutes, cost } = await writeMinutes(env.ANTHROPIC_API_KEY, org(), m.title, m.date, pieces, await getHints());
 		await d.batch([
 			d.prepare("UPDATE meetings SET status='ready', minutes=?, cost=? WHERE id=?").bind(JSON.stringify(minutes), cost, id),
 			d.prepare("DELETE FROM actions WHERE meeting_id=? AND status IN ('pending','approved','skipped')").bind(id),
@@ -130,6 +131,24 @@ async function finish(id: string) {
 		await d.prepare("UPDATE meetings SET status='error', error=? WHERE id=?").bind(msg.slice(0, 500), id).run();
 		return err(`Minutes failed: ${msg}`, 502);
 	}
+}
+
+// Name hints (current leads, students, employers) are pushed from the CRM by the admin; one row, replaced whole.
+async function getHints(): Promise<Hints | null> {
+	const r = await (await db()).prepare("SELECT data FROM hints WHERE id = 1").first<{ data: string }>();
+	try { return r ? JSON.parse(r.data) : null; } catch { return null; }
+}
+
+async function putHints(req: Request) {
+	const b = await req.json<Partial<Hints>>().catch(() => null);
+	const clean = (s: unknown) => typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+	const people = (Array.isArray(b?.people) ? b!.people : []).map(p => ({ name: clean(p?.name), note: clean(p?.note) }))
+		.filter(p => p.name).slice(0, 2000);
+	const employers = (Array.isArray(b?.employers) ? b!.employers : []).map(clean).filter(Boolean).slice(0, 2000);
+	if (!people.length && !employers.length) return err("Send { people: [{name, note}], employers: [name] }");
+	await (await db()).prepare("INSERT OR REPLACE INTO hints (id, data, updated_at) VALUES (1, ?, ?)")
+		.bind(JSON.stringify({ people, employers }), Date.now()).run();
+	return json({ people: people.length, employers: employers.length });
 }
 
 function buildActions(mn: MinutesT) {
@@ -184,6 +203,11 @@ export default {
 		try {
 			let m: RegExpMatchArray | null;
 			if (p === "/api/check") return json({ ok: true, org_name: org().org_name, staff: org().staff.map(s => s.name) });
+			if (p === "/api/hints" && req.method === "PUT") return putHints(req);
+			if (p === "/api/hints" && req.method === "GET") {
+				const h = await getHints();
+				return json({ people: h?.people?.length || 0, employers: h?.employers?.length || 0 });
+			}
 			if (p === "/api/meetings" && req.method === "GET") return listMeetings();
 			if (p === "/api/meetings" && req.method === "POST") return createMeeting(req);
 			if ((m = p.match(/^\/api\/meetings\/([\w-]+)$/)) && req.method === "GET") return getMeeting(m[1]);

@@ -38,6 +38,12 @@ export type Org = {
 	vocabulary: string[];
 };
 
+// Name hints pushed from the CRM (PUT /api/hints). Kept in D1, never in the repo.
+export type Hints = {
+	people: { name: string; note?: string }[]; // current leads and students, note = "lead" / batch code
+	employers: string[];
+};
+
 const SYSTEM = (org: Org) => `You are the meeting secretary for ${org.org_name}, ${org.org_description}.
 
 Turn a meeting transcript into accurate minutes that staff can act on.
@@ -51,19 +57,26 @@ Rules:
 - A follow-up meeting only counts if a day or time was agreed. List it under follow_up_meetings only, not also as an action item.
 - Open questions = things someone explicitly raised and left undecided. Do not add your own concerns.
 - Transcription can misspell names and terms; correct them using the staff list and vocabulary.
+- If a "Known people" or "Known employers" list is given, use it to spell students, leads and employers exactly
+  as the CRM has them, and prefer someone in a current batch when a first name matches several people.
+  Several first names said in a row ("Eli Jarrell Eric") are usually separate people: never join them into one
+  full name unless that exact full name is on the list. Expand a first name to a full name only when the list
+  has exactly one fitting match (right program and timing); otherwise keep the first name as heard.
 - Keep it short and plain. Staff read this on a phone.`;
 
 const ts = (s: number) => new Date(Math.max(0, s) * 1000).toISOString().substring(11, 19);
 
 export async function writeMinutes(apiKey: string, org: Org, title: string, date: string,
-	pieces: { start_s: number; text: string }[]) {
+	pieces: { start_s: number; text: string }[], hints?: Hints | null) {
 	const day = new Date(`${date}T12:00:00Z`);
 	const weekday = day.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
 	const transcript = pieces.map(p => `[${ts(p.start_s)}] ${p.text}`).join("\n");
 	const context = `Meeting: ${title}
 Meeting date: ${date} (${weekday})
 Staff list: ${org.staff.map(s => `${s.name} (${s.role}; also called ${(s.aliases || []).join(", ") || "-"})`).join("; ")}
-Vocabulary: ${org.vocabulary.join(", ")}`;
+Vocabulary: ${org.vocabulary.join(", ")}` +
+		(hints?.people?.length ? `\nKnown people (CRM spelling; note = lead or batch): ${hints.people.map(p => p.note ? `${p.name} [${p.note}]` : p.name).join("; ")}` : "") +
+		(hints?.employers?.length ? `\nKnown employers: ${hints.employers.join("; ")}` : "");
 
 	const client = new Anthropic({ apiKey });
 	const res = await client.messages.parse(
