@@ -218,6 +218,10 @@ Anthropic Claude API (structured outputs, Zod) · vanilla JS + Web Audio
 - [#7](https://github.com/github-pratik/ai-meeting-agent/issues/7) Free **speaker separation** for in-room meetings
 - [#8](https://github.com/github-pratik/ai-meeting-agent/issues/8) Import a **Zoom / Meet transcript** file *(good first issue)*
 
+## License
+
+[MIT](LICENSE). Contributions welcome: pick an issue from the roadmap above.
+
 ---
 
 Built by **Pratik Patil**, CRM & automation.
