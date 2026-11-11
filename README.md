@@ -36,7 +36,7 @@ flowchart LR
     G --> DB
     DB -->|Stop pressed| C[Claude API<br/>structured minutes]
     C --> R{Staff review<br/>approve / edit / skip}
-    R -->|approved| A[Admin runs /meeting<br/>Claude Code + MCP]
+    R -->|approved| A[Claude Code<br/>meeting-agent MCP server<br/>+ Zoho / Microsoft 365 MCP]
     A --> T[(Zoho CRM task)]
     A --> O[Outlook invite]
     A --> E[Recap email]
@@ -49,6 +49,8 @@ flowchart LR
 | Backup speech-to-text | Groq, Whisper large-v3-turbo | Steps in automatically if Cloudflare fails on a piece, so no minute is lost | Free tier |
 | Storage | Cloudflare D1 (SQLite) | Meetings, transcript pieces, minutes and approval state | Free |
 | Minutes | Claude API (Opus 5.5) | Reliable structured output; refuses to invent owners or tasks | ~$0.03 per 5 min, ~$0.15 per hour |
+| Sign-in | Zoho accounts (OpenID Connect) | Staff use the work account they already have; no passwords stored | Free |
+| Automation | The app's own MCP server (`/mcp`) | Claude Code lists approved items, creates them, and marks them done | Free |
 | Actions | Claude Code + MCP connectors | CRM and email writes use the admin's signed-in connectors, so no credentials live in the web app | Existing licences |
 
 **How a recording flows:** the page captures microphone audio at the device's native sample rate,
@@ -70,7 +72,12 @@ The Worker does almost no CPU work, which keeps it inside the free plan's limits
 - **Structured output, not free text.** Claude returns a validated schema (Zod / Pydantic), so every
   action item has a task, owner, ISO due date, priority and the exact quote it came from. Relative dates
   ("by Thursday", "next Tuesday") are resolved against the meeting date.
-- **Org details are secrets, not code.** Staff names, the team code and API keys are deployment secrets.
+- **Private meetings.** When someone taps Record, a popup asks who can see the notes: everyone on staff (the
+  default, for staff meetings) or only the people they pick (1:1s, small meetings). Leadership can always see
+  everything. The server enforces it on every request; a hidden meeting looks the same as one that doesn't exist.
+- **Sign in with the work account.** Staff sign in with Zoho (OpenID Connect, PKCE). Only emails on the staff list
+  get in, and removing someone from the list signs them out everywhere.
+- **Org details are secrets, not code.** Staff names and emails, the admin key and API keys are deployment secrets.
   This public repo uses a fictional school.
 
 ### Options considered and rejected
@@ -131,16 +138,29 @@ optionally, a Groq API key.
 ```bash
 cd cloud && npm install
 cf auth login
-cp .env.secrets.example.json .env.secrets.json   # fill in keys, team code and your staff list (git-ignored)
+cp .env.secrets.example.json .env.secrets.json   # fill in keys, Zoho client, admin key and your staff list (git-ignored)
 cf deploy --secrets-file .env.secrets.json
 ```
 
-Staff then open `https://<your-worker>/#code=<team-code>` once; the code is remembered on that device.
+Staff sign in with Zoho. Register a **server-based** client at https://api-console.zoho.com with redirect URI
+`https://<your-worker>/auth/callback` and put its id and secret in `.env.secrets.json`. Each staff entry in
+`ORG_CONFIG` needs the `email` they sign in with; `"access": "all"` lets someone see every meeting.
+
+**MCP server.** The Worker also serves a remote MCP endpoint at `/mcp` (Streamable HTTP, stateless) for Claude Code:
+
+```bash
+claude mcp add --transport http --scope local meeting-agent https://<your-worker>/mcp --header "x-admin-key: <ADMIN_API_KEY>"
+```
+
+Tools: `list_meetings`, `get_meeting`, `get_transcript`, `list_approved_actions`, `update_action`, `regenerate_minutes`,
+`set_meeting_access`, `update_meeting`, `delete_meeting`, `list_staff`, `get_name_hints`, `set_name_hints`, `app_status`.
+A typical run: list approved items → create each one in the CRM or Outlook (with the user's OK) → `update_action`
+marks it done, and the web page shows it.
 
 **Name hints (optional).** Push the CRM's current leads, students and employers so the minutes spell them
 exactly as the CRM does and don't merge first names said in a row into one person:
 `PUT /api/hints` with `{ "people": [{ "name": "...", "note": "lead" | "<batch code>" }], "employers": ["..."] }`
-(team-code header). The list lives only in the database, never in the repo.
+(admin key, or the `set_name_hints` MCP tool). The list lives only in the database, never in the repo.
 
 ### Local, on-premises (Apple Silicon Mac)
 
@@ -167,8 +187,6 @@ Anthropic Claude API (structured outputs, Zod) · vanilla JS + Web Audio
 
 ## What's next
 
-- Approved tasks created directly through the Zoho CRM API from the web page.
-- Sign-in with the team's Zoho accounts instead of a shared code.
 - Keep the audio for playback beside each task's quote.
 - Weekly "open tasks from meetings" digest per person.
 

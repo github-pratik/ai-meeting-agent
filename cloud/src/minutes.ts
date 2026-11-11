@@ -34,7 +34,8 @@ export type MinutesT = z.infer<typeof Minutes>;
 export type Org = {
 	org_name: string;
 	org_description: string;
-	staff: { name: string; role: string; aliases?: string[] }[];
+	// email = the Zoho account they sign in with; access "all" = sees every meeting, including private ones
+	staff: { name: string; role: string; aliases?: string[]; email?: string; access?: "all" }[];
 	vocabulary: string[];
 };
 
