@@ -89,6 +89,9 @@ ul.clean { margin: 0; padding-left: 18px; } ul.clean li { margin: 3px 0; }
 <script>
 const $app = document.getElementById('app');
 const PIECE_SECONDS = 60, RATE = 16000;
+// A forgotten recording stops itself: QUIET_STOP silent minutes in a row (warning at QUIET_WARN),
+// the computer asleep / microphone dead for GAP_STOP minutes, or MAX_HOURS in total.
+const QUIET_WARN = 5, QUIET_STOP = 10, GAP_STOP = 10, MAX_HOURS = 4;
 let INFO = { org_name: '', staff: [], me: null };
 const ui = { id: null, tab: 'actions', open: new Set() };
 
@@ -328,6 +331,8 @@ function viewNew() {
         <div id="lvlWrap" hidden style="margin:10px auto 0;max-width:260px"><div class="small muted">Microphone level</div>
           <div style="height:8px;background:var(--line);border-radius:4px;overflow:hidden"><i id="lvl" style="display:block;height:100%;width:0;background:var(--ok);transition:width .15s"></i></div></div>
         <div class="small muted" id="pieces" style="margin-top:8px"></div>
+        <div id="quiet" hidden class="small" style="margin-top:8px"><span id="quietMsg"></span>
+          <button class="btn plain sm" id="keep" style="margin-left:6px">Keep recording</button></div>
         <div class="who" id="who" style="margin-top:4px"></div>
       </div>
       <div id="liveWrap" hidden><label>Transcript so far (updates every minute)</label><div class="live" id="live"></div></div>
@@ -341,6 +346,7 @@ function viewNew() {
     $('access').querySelectorAll('.people input:not(:disabled)').forEach(i => i.checked = att.has(i.value)); });
   let id = null, ctx, stream, proc, src, display = null, dsrc = null, wake, t0, tick, floats = [], nSamples = 0, pieceStart = 0, idx = 0;
   const queue = [], done = []; let sending = false, prevText = '', stopped = false;
+  let quiet = 0, lastTick = 0, lastAudio = 0, autoReason = '';   // quiet = silent minutes in a row
 
   const status = () => { $('pieces').textContent = idx ? `${done.length} of ${idx} minute${idx === 1 ? '' : 's'} transcribed` : ''; };
   const showLive = () => { $('liveWrap').hidden = !done.length;
@@ -356,12 +362,30 @@ function viewNew() {
           const q = new URLSearchParams({start: p.start.toFixed(1), end: p.end.toFixed(1), prev: prevText.slice(-150)});
           const r = await api(`/api/meetings/${id}/pieces/${p.idx}?${q}`, {method: 'POST', headers: {'content-type': 'text/plain'}, body: p.b64});
           prevText = r.text || prevText; done.push({idx: p.idx, start: p.start, text: r.text}); ok = true;
+          quiet = (r.text || '').trim() ? 0 : quiet + 1; checkQuiet();
         } catch (e) { await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); }
       }
       if (!ok) { $('err').textContent = `Minute ${p.idx + 1} could not be sent. Check the connection; it will retry.`; break; }
       queue.shift(); status(); showLive();
     }
     sending = false;
+  }
+
+  function checkQuiet() {
+    if (stopped || !recording) return;
+    if (quiet >= QUIET_STOP) return autoStop(`No one spoke for ${QUIET_STOP} minutes, so the recording stopped by itself.`);
+    $('quiet').hidden = quiet < QUIET_WARN;
+    $('quietMsg').textContent = `No one has spoken for ${quiet} minutes. Recording stops by itself after ${QUIET_STOP}.`;
+  }
+  function autoStop(reason) { if (stopped) return; autoReason = reason; stop(); }
+  // Runs every half second. Timers and audio both pause while the computer sleeps, so a long gap = it slept.
+  function watch() {
+    const now = Date.now();
+    $('timer').textContent = fmt((now - t0) / 1000);
+    if (now - lastTick > GAP_STOP * 60000 || now - lastAudio > GAP_STOP * 60000)
+      return autoStop(`The computer slept or the microphone stopped for over ${GAP_STOP} minutes, so the recording stopped by itself.`);
+    if (now - t0 > MAX_HOURS * 3600000) return autoStop(`Recordings stop by themselves after ${MAX_HOURS} hours.`);
+    lastTick = now;
   }
 
   function cut(final) {
@@ -408,7 +432,7 @@ function viewNew() {
       src = ctx.createMediaStreamSource(stream);
       proc = ctx.createScriptProcessor(4096, 1, 1);
       proc.onaudioprocess = e => {
-        const d = e.inputBuffer.getChannelData(0); floats.push(new Float32Array(d)); nSamples += d.length;
+        const d = e.inputBuffer.getChannelData(0); floats.push(new Float32Array(d)); nSamples += d.length; lastAudio = Date.now();
         if (++beats % 3 === 0) { let s = 0; for (let i = 0; i < d.length; i += 4) s += d[i] * d[i];
           $('lvl').style.width = `${Math.min(100, Math.round(Math.sqrt(s / (d.length / 4)) * 400))}%`; }
         if (nSamples >= ctx.sampleRate * PIECE_SECONDS) cut(false);
@@ -422,7 +446,8 @@ function viewNew() {
       }
       mix.connect(proc); proc.connect(ctx.destination);
       try { wake = await navigator.wakeLock?.request('screen'); } catch {}
-      t0 = Date.now(); tick = setInterval(() => $('timer').textContent = fmt((Date.now() - t0) / 1000), 500);
+      t0 = lastTick = lastAudio = Date.now(); tick = setInterval(watch, 500);
+      $('keep').onclick = () => { quiet = 0; $('quiet').hidden = true; };
       recording = true;
       $('state').innerHTML = '<span class="dot"></span>Recording… keep this screen open and unlocked.';
       $('rec').textContent = '■ Stop & make minutes';
@@ -437,7 +462,8 @@ function viewNew() {
 
   async function stop() {
     if (stopped) return; stopped = true;
-    $('rec').disabled = true; clearInterval(tick);
+    $('rec').disabled = true; clearInterval(tick); $('quiet').hidden = true;
+    if (autoReason) $('err').textContent = autoReason;
     try { proc.disconnect(); src.disconnect(); dsrc && dsrc.disconnect(); } catch {}
     stream.getTracks().forEach(t => t.stop());
     display && display.getTracks().forEach(t => t.stop());
@@ -446,7 +472,12 @@ function viewNew() {
     while (queue.length || sending) { await pump(); await new Promise(r => setTimeout(r, 500)); if (queue.length && !sending) await new Promise(r => setTimeout(r, 3000)); }
     try { ctx.close(); } catch {}
     $('state').innerHTML = '<span class="dot"></span>Claude is writing the minutes (about 1 minute, longer for long meetings)…';
-    try { await post(`/api/meetings/${id}/finish`, {}); location.hash = '#/m/' + encodeURIComponent(id); }
+    try {
+      // After a long sleep the server may already have written the minutes (it does that after 2 quiet hours).
+      const cur = await api(`/api/meetings/${encodeURIComponent(id)}`).catch(() => ({}));
+      if (cur.status !== 'ready') await post(`/api/meetings/${id}/finish`, {});
+      location.hash = '#/m/' + encodeURIComponent(id);
+    }
     catch (e) { $('err').innerHTML = `Couldn't make the minutes (${esc(e.message)}). <a href="#/m/${encodeURIComponent(id)}">Open the meeting</a> to retry.`; }
   }
 }

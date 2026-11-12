@@ -27,7 +27,7 @@ const SCHEMA = [
 // Columns added after the first release; existing meetings default to "everyone".
 const MEETING_COLUMNS: Record<string, string> = {
 	visibility: "TEXT DEFAULT 'everyone'", viewers: "TEXT DEFAULT '[]'", created_by: "TEXT DEFAULT ''",
-	participants: "TEXT DEFAULT '[]'",
+	participants: "TEXT DEFAULT '[]'", last_piece_at: "INTEGER DEFAULT 0",
 };
 let schemaReady = false;
 export async function db() {
@@ -48,7 +48,8 @@ export function org(): Org {
 
 // ---------- access ----------
 export type MeetingRow = { id: string; title: string; date: string; created_at: number; status: string; error: string | null;
-	minutes: string | null; cost: number | null; visibility: string; viewers: string; created_by: string; participants: string };
+	minutes: string | null; cost: number | null; visibility: string; viewers: string; created_by: string; participants: string;
+	last_piece_at?: number };
 
 // Who was in the meeting: staff (by email) and guests (name + company). Helps Claude assign owners.
 export type Participant = { name: string; email?: string; role?: string; org?: string; guest: boolean };
@@ -165,8 +166,11 @@ async function addPiece(req: Request, u: User, id: string, idx: number) {
 		text = await groqTranscribe(audio, `Staff meeting with ${names}. ${prev}`);
 		engine = "groq";
 	}
-	await (await db()).prepare("INSERT OR REPLACE INTO pieces (meeting_id, idx, start_s, end_s, text) VALUES (?, ?, ?, ?, ?)")
-		.bind(id, idx, start, end, text).run();
+	const d = await db();
+	await d.batch([
+		d.prepare("INSERT OR REPLACE INTO pieces (meeting_id, idx, start_s, end_s, text) VALUES (?, ?, ?, ?, ?)").bind(id, idx, start, end, text),
+		d.prepare("UPDATE meetings SET last_piece_at = ? WHERE id = ?").bind(Date.now(), id),
+	]);
 	return json({ idx, text, engine });
 }
 
@@ -404,7 +408,22 @@ async function api(req: Request, u: User, p: string) {
 	return err("Unknown route", 404);
 }
 
-export async function runSweep() { return sweep(await db(), org()); }
+// A recording nobody stopped (tab closed, laptop shut): after 2 hours with no new audio, write the minutes anyway.
+const STALE_MS = 2 * 3600_000;
+async function finishStale() {
+	const d = await db();
+	const stale = (await d.prepare(`SELECT id FROM meetings WHERE status = 'recording'
+		AND MAX(created_at, COALESCE(last_piece_at, 0)) < ? LIMIT 5`).bind(Date.now() - STALE_MS).all<{ id: string }>()).results;
+	const robot: User = { email: "auto-finish", name: "Auto finish", all: true, admin: false };
+	let finished = 0;
+	for (const { id } of stale) { try { await finish(robot, id); finished++; } catch (e) { console.error("auto-finish", id, e); } }
+	return finished;
+}
+
+export async function runSweep() {
+	const auto_finished = await finishStale();
+	return { ...(await sweep(await db(), org())), auto_finished };
+}
 
 export default {
 	async scheduled(_c: ScheduledController, _e: unknown, ctx: ExecutionContext) { ctx.waitUntil(runSweep()); },
