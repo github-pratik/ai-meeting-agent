@@ -58,6 +58,17 @@ converts it to 16 kHz WAV itself, and uploads one piece every 60 seconds (retryi
 piece is transcribed while the meeting is still going, so minutes are ready about 15 seconds after Stop.
 The Worker does almost no CPU work, which keeps it inside the free plan's limits.
 
+**Forgotten recordings stop themselves.** Pressing Stop is still the normal way to end a meeting, but if nobody does:
+
+| What happens | What the app does |
+|---|---|
+| No one talks | After 10 silent minutes a **Keep recording** prompt appears; with no answer the recording stops at 20 and the minutes are written |
+| Laptop sleeps or the phone locks | Timers and audio both pause while asleep, so a 10+ minute gap means it slept; the recording stops on wake |
+| Very long recording | Every recording stops at 4 hours |
+| Tab closed, laptop never reopened | The 15-minute cron writes the minutes for any meeting with no new audio for 2 hours |
+
+Silent minutes are left out of the minutes, and the page checks the meeting first so the minutes are never written twice.
+
 ## Tasks people actually own
 
 A proposed task isn't anyone's job until its owner accepts it.
@@ -137,6 +148,12 @@ It hasn't run on a real staff meeting yet; the next step is a pilot with the tea
 - **Check what existing automations do with your records.** A CRM rule closed every open task on a lead
   when the lead's status changed, which would have silently erased meeting tasks. The agent now warns
   before linking a task to a lead.
+- **A recording clock is not a recording.** A laptop meeting was left running overnight and the page showed
+  18 hours, but the laptop had gone to sleep after two; only those two hours of audio were ever sent. The page
+  now watches for silence and sleep gaps and stops itself, and the server finishes anything left open.
+- **Shared spreadsheets have merged cells.** Adding a table row makes Excel insert cells, and it refuses when
+  merged cells would move. The sync now fills a blank table row first, or writes just below the table and
+  re-wraps the table around it, so nothing is ever inserted or shifted.
 - **Phone sign-in has to forgive paste.** A password field hid typos and pasted extra text. A plain field
   that extracts the code from whatever is pasted, plus a one-tap sign-in link, fixed it.
 
