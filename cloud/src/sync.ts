@@ -139,19 +139,20 @@ const colEnd = String.fromCharCode(64 + HEADERS.length); // "G"
 async function ensureTable(db: D1Database, tab: string, sid?: Sid) {
 	const name = tableName(tab);
 	if (await cacheGet(db, `table:${env.MS_TTP_ITEM_ID}:${name}`)) return name;
-	const t = await graph(db, "GET", `/tables/${name}?$select=name`, sid);
+	const t = await graph(db, "GET", `/tables/${name}?$select=name`, undefined, sid);
 	if (!t?.notFound) { await cachePut(db, `table:${env.MS_TTP_ITEM_ID}:${name}`, "1", 86400e3); return name; }
-	const used = await graph(db, "GET", `${ws(tab)}/usedRange(valuesOnly=true)?$select=address`, sid);
+	const used = await graph(db, "GET", `${ws(tab)}/usedRange(valuesOnly=true)?$select=address`, undefined, sid);
 	if (used?.notFound) throw new Error(`Sheet tab "${tab}" not found`);
 	const last = Number(String(used?.address || "A1").match(/(\d+)$/)?.[1] || 1);
 	const titleRow = last + 3, headRow = titleRow + 1;
-	await graph(db, "PATCH", `${ws(tab)}/range(address='A${titleRow}')`, { values: [["From meetings — kept up to date by the Meeting Agent. Edit or accept tasks in the app, not here."]] }, sid);
-	await graph(db, "PATCH", `${ws(tab)}/range(address='A${titleRow}')/format/font`, { bold: true }, sid);
-	await graph(db, "PATCH", `${ws(tab)}/range(address='A${headRow}:${colEnd}${headRow}')`, { values: [HEADERS] }, sid);
+	// Make the table first: if Excel refuses (e.g. merged cells in the way), nothing has been written to the tab yet,
+	// so retries don't pile up title rows.
 	const made = await graph(db, "POST", `${ws(tab)}/tables/add`, { address: `A${headRow}:${colEnd}${headRow + 1}`, hasHeaders: true }, sid);
 	await graph(db, "PATCH", `/tables/${made.id}`, { name }, sid);
+	await graph(db, "PATCH", `${ws(tab)}/range(address='A${titleRow}')`, { values: [["From meetings — kept up to date by the Meeting Agent. Edit or accept tasks in the app, not here."]] }, sid);
+	await graph(db, "PATCH", `${ws(tab)}/range(address='A${titleRow}')/format/font`, { bold: true }, sid);
 	// Excel sometimes widens a new table to match the data above it; drop any columns past ours.
-	const cols = ((await graph(db, "GET", `/tables/${name}/columns?$select=id,index`, sid))?.value || []) as { id: string; index: number }[];
+	const cols = ((await graph(db, "GET", `/tables/${name}/columns?$select=id,index`, undefined, sid))?.value || []) as { id: string; index: number }[];
 	for (const c of cols.filter(c => c.index >= HEADERS.length).sort((a, b) => b.index - a.index))
 		await graph(db, "DELETE", `/tables/${name}/columns/${c.id}`, undefined, sid);
 	await graph(db, "PATCH", `/tables/${name}/headerRowRange`, { values: [HEADERS] }, sid);   // make sure the column names stick
@@ -168,13 +169,39 @@ async function upsertRow(db: D1Database, tab: string, ref: string, values: strin
 	const width = rows[0]?.values.length || HEADERS.length;   // fit the row to the table, whatever its width
 	values = [...values, ...Array(Math.max(0, width - values.length)).fill("")].slice(0, width);
 	const mine = rows.filter(r => r.values[HEADERS.length - 1] === ref);
-	if (mine[0]) await graph(db, "PATCH", `/tables/${name}/rows/itemAt(index=${mine[0].index})`, { values: [values] }, sid);
-	else await graph(db, "POST", `/tables/${name}/rows`, { values: [values] }, sid);
+	const blank = rows.find(r => r.values.every(v => v === "" || v === null));   // a new table starts with one; removed tasks may leave some
+	const spot = mine[0] || blank;
+	if (spot) await graph(db, "PATCH", `/tables/${name}/rows/itemAt(index=${spot.index})`, { values: [values] }, sid);
+	else await addRow(db, tab, name, values, sid);
 	rows = await tableRows(db, name, sid);
-	const drop = [...rows.filter(r => r.values[HEADERS.length - 1] === ref).slice(1),          // leftovers from an interrupted sync
-		...rows.filter(r => r.values.every(v => v === "" || v === null))];                       // the blank row a new table starts with
-	if (rows.length - drop.length >= 1)
-		for (const r of drop.sort((x, y) => y.index - x.index)) await graph(db, "DELETE", `/tables/${name}/rows/itemAt(index=${r.index})`, undefined, sid);
+	const drop = rows.filter(r => r.values[HEADERS.length - 1] === ref).slice(1);   // leftovers from an interrupted sync
+	for (const r of drop.sort((x, y) => y.index - x.index)) await deleteRow(db, name, r.index, sid);
+}
+const mergedBlock = (e: unknown) => /merged cells/i.test(String(e));
+// Adding a table row makes Excel insert cells, which it refuses when merged cells would move. Then write the row
+// just below the table instead and re-wrap the table around it (nothing is inserted or shifted that way).
+async function addRow(db: D1Database, tab: string, name: string, values: string[], sid?: Sid) {
+	try { await graph(db, "POST", `/tables/${name}/rows`, { values: [values] }, sid); return; }
+	catch (e) { if (!mergedBlock(e)) throw e; }
+	const addr = String((await graph(db, "GET", `/tables/${name}/range?$select=address`, undefined, sid))?.address || "");
+	const m = addr.match(/!\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)$/);
+	if (!m) throw new Error(`Sheet: can't read the table range (${addr})`);
+	const below = `${m[1]}${Number(m[4]) + 1}:${m[3]}${Number(m[4]) + 1}`;
+	const under = await graph(db, "GET", `${ws(tab)}/range(address='${below}')?$select=values`, undefined, sid);
+	if ((under?.values?.[0] || []).some((v: unknown) => v !== "" && v !== null))
+		throw new Error(`Sheet tab "${tab}": row ${below} under the task table isn't empty, so the table can't grow`);
+	await graph(db, "PATCH", `${ws(tab)}/range(address='${below}')`, { values: [values] }, sid);
+	await graph(db, "POST", `/tables/${name}/convertToRange`, {}, sid);
+	const made = await graph(db, "POST", `${ws(tab)}/tables/add`, { address: `${m[1]}${m[2]}:${m[3]}${Number(m[4]) + 1}`, hasHeaders: true }, sid);
+	await graph(db, "PATCH", `/tables/${made.id}`, { name }, sid);
+}
+// Deleting shifts cells up, which merged cells can block too; then just blank the row (the next task reuses it).
+async function deleteRow(db: D1Database, name: string, index: number, sid?: Sid) {
+	try { await graph(db, "DELETE", `/tables/${name}/rows/itemAt(index=${index})`, undefined, sid); }
+	catch (e) {
+		if (!mergedBlock(e)) throw e;
+		await graph(db, "PATCH", `/tables/${name}/rows/itemAt(index=${index})`, { values: [HEADERS.map(() => "")] }, sid);
+	}
 }
 async function removeRow(db: D1Database, tab: string, ref: string, sid?: Sid) {
 	const name = tableName(tab);
@@ -183,7 +210,7 @@ async function removeRow(db: D1Database, tab: string, ref: string, sid?: Sid) {
 	let left = rows.length;
 	for (const hit of mine) {   // a table must keep one row: blank it instead of deleting the last one
 		if (left === 1) await graph(db, "PATCH", `/tables/${name}/rows/itemAt(index=${hit.index})`, { values: [HEADERS.map(() => "")] }, sid);
-		else { await graph(db, "DELETE", `/tables/${name}/rows/itemAt(index=${hit.index})`, undefined, sid); left--; }
+		else { await deleteRow(db, name, hit.index, sid); left--; }
 	}
 }
 
