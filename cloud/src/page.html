@@ -91,7 +91,7 @@ const $app = document.getElementById('app');
 const PIECE_SECONDS = 60, RATE = 16000;
 // A forgotten recording stops itself: QUIET_STOP silent minutes in a row (warning at QUIET_WARN),
 // the computer asleep / microphone dead for GAP_STOP minutes, or MAX_HOURS in total.
-const QUIET_WARN = 5, QUIET_STOP = 10, GAP_STOP = 10, MAX_HOURS = 4;
+const QUIET_WARN = 10, QUIET_STOP = 20, GAP_STOP = 10, MAX_HOURS = 4;
 let INFO = { org_name: '', staff: [], me: null };
 const ui = { id: null, tab: 'actions', open: new Set() };
 
